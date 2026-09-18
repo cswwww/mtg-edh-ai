@@ -1,0 +1,35 @@
+# ---- macOS ----
+.DS_Store
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+.venv/
+
+# ---- Node / 前端 ----
+node_modules/
+web/dist/
+.npm-cache/
+*.log
+
+# ---- 生成的数据(体积大,可由 scripts/ 重新构建) ----
+data/raw/
+data/vectordb/
+data/cards.jsonl
+data/tags.jsonl
+web/data/
+
+# ---- 运行时缓存 ----
+data/raw/*/          # 兜底:所有抓取缓存
+*.tmp
+
+# ---- 环境/密钥 ----
+.env
+.env.*
+!.env.example
+# 含本机缓存路径配置
+web/.npmrc
+
+# ---- 保留进库的小数据 ----
+!data/slang.txt
+!data/tagdict.txt

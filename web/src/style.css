@@ -1,0 +1,74 @@
+@import "tailwindcss";
+
+@theme {
+  --color-ink: #191715;
+  --color-panel: #211d19;
+  --color-panel2: #2a2520;
+  --color-line: #3a332a;
+  --color-parch: #f4ecd8;
+  --color-mute: #a3967d;
+  --color-faint: #6e6350;
+  --color-gold: #d4a437;
+  --color-golddim: #8a6d24;
+  --color-emerald: #6cc28b;
+  --color-rose: #e08a8a;
+
+  --font-display: "Spectral", "Songti SC", "STSong", serif;
+  --font-body:
+    -apple-system, "Helvetica Neue", "PingFang SC", "Hiragino Sans GB",
+    "Microsoft YaHei", sans-serif;
+  --font-num: ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+html,
+body {
+  background: var(--color-ink);
+  color: var(--color-parch);
+  font-family: var(--font-body);
+}
+
+/* 细滚动条 */
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-thumb {
+  background: #3a332a;
+  border: 3px solid var(--color-ink);
+  border-radius: 6px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* 图片渐入 */
+.cardimg {
+  opacity: 0;
+  transition: opacity 0.35s ease;
+}
+.cardimg.loaded {
+  opacity: 1;
+}
+
+/* 卡名悬停高亮块 */
+.hl-title {
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+.group:hover .hl-title {
+  color: var(--color-gold);
+}
+
+.mana-sym {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.05em;
+  height: 1.05em;
+  border-radius: 9999px;
+  font-size: 0.82em;
+  font-weight: 700;
+  line-height: 1;
+  vertical-align: -0.12em;
+  font-family: var(--font-body);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.35);
+}
