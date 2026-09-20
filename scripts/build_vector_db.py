@@ -41,15 +41,6 @@ def embed_text(r):
     # AI 功能定位是语义检索的核心:一句话说清这张卡是干什么的
     if r.get("ai_desc"):
         parts.append("功能定位: " + r["ai_desc"])
-    # AI 结构化元数据(来自 tag_cards.py)
-    # - deck_role / strategy / theme_keywords 进嵌入,提升"找这类卡"的召回
-    # - countermeta / phase 是 meta 信息,不进嵌入(不影响"这张卡是什么")
-    if r.get("ai_deck_role"):
-        parts.append("卡组角色 " + " ".join(r["ai_deck_role"]))
-    if r.get("ai_strategy"):
-        parts.append("策略主题 " + " ".join(r["ai_strategy"]))
-    if r.get("ai_theme_keywords"):
-        parts.append("俗称联想 " + " ".join(r["ai_theme_keywords"]))
     if r.get("ai_tags"):
         parts.append("AI标签 " + ", ".join(r["ai_tags"]))
 

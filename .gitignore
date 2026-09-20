@@ -10,13 +10,19 @@ __pycache__/
 node_modules/
 web/dist/
 .npm-cache/
+# vite 依赖预构建缓存
+.vite/
 *.log
 
 # ---- 生成的数据(体积大,可由 scripts/ 重新构建) ----
 data/raw/
-data/vectordb/
+data/vectordb*
 data/cards.jsonl
 data/tags.jsonl
+# 库重建前的手动备份(近百 MB)
+data/backup/
+# 标签嵌入等生成的二进制产物
+data/*.npz
 web/data/
 
 # ---- 运行时缓存 ----

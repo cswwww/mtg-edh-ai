@@ -42,9 +42,14 @@ export const state = reactive({
   detailId: null,
   typeDirect: null,   // 主搜索栏触发"分词类型直搜"时的 token 列表
   meta: null,
+  omitQNext: false,    // 下次 search() 调用时不带 q(点 chip 时设 true,一次性)
   slangOpen: false,
   tagPickerOpen: false,
   typeModalOpen: false,
+  semanticTags: [],   // /api/tags/semantic 实时返回的命中标签 chip
+  semanticQuery: '',   // 语义快照(驱动 chip 行;点 chip 清空 q 时保留)
+  semanticExpanded: '',// 后端实际 embed 的展开后文本(展示用)
+  semanticLoading: false,
 })
 
 // 视图尺寸持久化
@@ -75,7 +80,10 @@ export async function search(resetPage = true) {
   state.loading = true
   state.error = ''
   const p = new URLSearchParams()
-  p.set('q', state.q)
+  // 语义文本只用来发现标签,点 chip 时设置 omitQNext=true,这次 search 不带 q 字段
+  const q = state.omitQNext ? '' : state.q
+  state.omitQNext = false
+  p.set('q', q)
   p.set('mode', state.mode)
   if (state.cardColors.length || state.ccColorless) {
     p.set('cc_colors', state.cardColors.join(','))

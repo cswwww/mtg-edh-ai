@@ -160,52 +160,10 @@ function setTitle(s) {
 }
 
 // ---- AI 元数据展示 ----
-// 是否有任何 AI 内容
+// 是否有任何 AI 内容(只有 ai_desc 一个字段了)
 const hasAiMeta = computed(() => {
-  const d = detail.value
-  if (!d) return false
-  return !!(
-    d.ai_desc ||
-    d.ai_deck_role?.length ||
-    d.ai_strategy?.length ||
-    d.ai_countermeta?.answers?.length ||
-    d.ai_countermeta?.weak_to?.length ||
-    (d.ai_phase && d.ai_phase !== 'any') ||
-    d.ai_theme_keywords?.length
-  )
+  return !!(detail.value?.ai_desc)
 })
-
-// AI 枚举值 → 中文显示
-const roleZh = {
-  ramp: '法术力加速', card_advantage: '抓牌优势', removal: '去除',
-  wincon: '致胜手段', protection: '保护', combo: '组合技组件',
-  tutor: '导师', card_selection: '手牌筛选', recursion: '坟场利用',
-  mana_rock: '法术力资源', token: '铺场', finisher: '终结技',
-  counter: '反击', draw_engine: '抓牌引擎', threat: '战场威胁',
-}
-const strategyZh = {
-  tokens: '衍生物', aristocrats: '贵族牺牲', reanimator: '复生',
-  voltron: '指挥官武装', lifegain: '回血', mill: '磨牌',
-  control: '控制', combo: '组合技', stax: '资源锁控',
-  spellslinger: '法术狂', '+1+1_counters': '指示物',
-  sacrifice: '牺牲', blink: '闪现', flicker: '闪烁',
-  treasures: '珍宝', artifact: '神器', enchantress: '结界',
-  graveyard: '坟场', burn: '直伤', anthem: '群体增益', evasion: '穿透',
-}
-const phaseZh = {
-  early: '前期', mid: '中盘', late: '终盘', any: '通用',
-}
-const counterZh = {
-  hexproof: '辟邪生物', evasion: '穿透生物', planeswalker: '鹏洛客',
-  artifact: '神器', enchantment: '结界', graveyard: '坟场',
-  commander: '指挥官', token: '衍生物', aristocrat: '贵族牺牲',
-  flyer: '飞行生物', indestructible: '不灭生物',
-  high_cost_threat: '高费威胁', tapped_creature: '横置生物',
-  mass_removal: '扫场', counter_spell: '反击咒语',
-  graveyard_hate: '坟场仇恨', artifact_hate: '神器破坏',
-  enchantment_hate: '结界破坏', trample: '践踏生物', lifegain: '回血',
-  protection_from_color: '单色保护', tutor_hate: '反导师',
-}
 </script>
 
 <template>
@@ -352,68 +310,11 @@ const counterZh = {
             </div>
           </div>
 
-          <!-- AI 元数据(LLM 生成的结构化字段) -->
+          <!-- AI 功能定位(LLM 一句话) -->
           <div v-if="hasAiMeta" class="mt-5">
-            <p class="mb-1.5 text-[10px] tracking-[0.2em] text-faint">AI · 卡牌元数据</p>
-
-            <!-- 功能定位 -->
+            <p class="mb-1.5 text-[10px] tracking-[0.2em] text-faint">AI · 功能定位</p>
             <div v-if="detail.ai_desc" class="border-l-2 border-golddim pl-3 text-xs text-parch">
-              <p class="mb-1 text-[10px] tracking-[0.2em] text-faint">功能定位</p>
               <p>{{ detail.ai_desc }}</p>
-            </div>
-
-            <!-- 卡组角色 + 策略主题 -->
-            <div v-if="detail.ai_deck_role?.length || detail.ai_strategy?.length" class="mt-3">
-              <p class="mb-1 text-[10px] tracking-[0.2em] text-faint">卡组角色 / 策略主题</p>
-              <div class="flex flex-wrap gap-1">
-                <span
-                  v-for="r in detail.ai_deck_role || []"
-                  :key="'r-' + r"
-                  :title="r"
-                  class="rounded-sm border border-golddim/60 bg-golddim/15 px-1.5 py-0.5 text-[10px] text-gold"
-                >{{ roleZh[r] || r }}</span>
-                <span
-                  v-for="s in detail.ai_strategy || []"
-                  :key="'s-' + s"
-                  :title="s"
-                  class="rounded-sm border border-line bg-panel2 px-1.5 py-0.5 text-[10px] text-mute"
-                >{{ strategyZh[s] || s }}</span>
-                <span
-                  v-if="detail.ai_phase && detail.ai_phase !== 'any'"
-                  :title="'phase: ' + detail.ai_phase"
-                  class="ml-1 rounded-sm border border-line bg-panel2 px-1.5 py-0.5 text-[10px] tracking-wider text-faint"
-                >{{ phaseZh[detail.ai_phase] || detail.ai_phase }}</span>
-              </div>
-            </div>
-
-            <!-- 反制 meta:克 / 怕 -->
-            <div
-              v-if="detail.ai_countermeta?.answers?.length || detail.ai_countermeta?.weak_to?.length"
-              class="mt-3"
-            >
-              <p class="mb-1 text-[10px] tracking-[0.2em] text-faint">反制关系</p>
-              <div class="space-y-1 text-[11px]">
-                <p v-if="detail.ai_countermeta.answers?.length" class="flex flex-wrap items-baseline gap-1.5">
-                  <span class="shrink-0 rounded-sm bg-emerald/15 px-1.5 py-0.5 text-[10px] font-bold tracking-wider text-emerald">克</span>
-                  <span class="text-parch">{{ detail.ai_countermeta.answers.map(c => counterZh[c] || c).join('、') }}</span>
-                </p>
-                <p v-if="detail.ai_countermeta.weak_to?.length" class="flex flex-wrap items-baseline gap-1.5">
-                  <span class="shrink-0 rounded-sm bg-rose/15 px-1.5 py-0.5 text-[10px] font-bold tracking-wider text-rose">怕</span>
-                  <span class="text-parch">{{ detail.ai_countermeta.weak_to.map(c => counterZh[c] || c).join('、') }}</span>
-                </p>
-              </div>
-            </div>
-
-            <!-- 用户俗称 / 联想词 -->
-            <div v-if="detail.ai_theme_keywords?.length" class="mt-3">
-              <p class="mb-1 text-[10px] tracking-[0.2em] text-faint">用户俗称 / 联想词</p>
-              <div class="flex flex-wrap gap-1">
-                <span
-                  v-for="k in detail.ai_theme_keywords"
-                  :key="k"
-                  class="rounded-sm border border-line bg-panel2 px-1.5 py-0.5 text-[10px] text-mute"
-                >{{ k }}</span>
-              </div>
             </div>
           </div>
 

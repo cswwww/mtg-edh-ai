@@ -1083,6 +1083,101 @@ def tags(q: str = "", limit: int = 60):
                       for _, n, t in hits[:min(200, max(1, limit))]]}
 
 
+# ---------------- 标签语义嵌入 ----------------
+import numpy as _np
+
+TAG_EMB_FILE = os.path.join(ROOT, "data", "tag_embeddings.npz")
+_tag_emb = None          # {tags: ndarray, zh: ndarray, counts: ndarray, vecs: ndarray}
+
+
+def _load_tag_emb():
+    """懒加载:首次 /api/tags/semantic 调用时读 .npz,文件缺失时自动重建。"""
+    global _tag_emb
+    if _tag_emb is not None:
+        return _tag_emb
+    if not os.path.exists(TAG_EMB_FILE):
+        # 缺失产物:拉一次 build_tag_embeddings.py,确保离线构建过至少一次
+        import subprocess
+        print(f"[tag-emb] {TAG_EMB_FILE} missing, running build_tag_embeddings.py ...")
+        subprocess.check_call(["python3",
+                               os.path.join(ROOT, "scripts", "build_tag_embeddings.py")])
+    z = _np.load(TAG_EMB_FILE)
+    _tag_emb = {
+        "tags": z["tags"],
+        "zh": z["zh"],
+        "counts": z["counts"],
+        "vecs": z["vecs"].astype(_np.float32),  # 已 L2 归一
+    }
+    print(f"[tag-emb] loaded {len(_tag_emb['tags'])} tag embeddings from {TAG_EMB_FILE}")
+    return _tag_emb
+
+
+@app.get("/api/tags/semantic")
+def tags_semantic(q: str = "", limit: int = 10, min_sim: float = 0.0,
+                  drop_below: float = 0.10):
+    """语义搜索标签:query 经黑话展开后嵌入,与 2803 个 SF 标签描述向量做 cosine。
+
+    过滤策略(两段):
+      min_sim  — 硬下限,过滤方向完全无关的标签(默认 0,基本不卡)
+      drop_below — 相对截断,score 低于 top1 * drop_below 的标签也丢掉
+                   (避免"产费"cosine 普遍 0.2-0.3 时把噪声拉进 top)
+
+    重排(加法,不放大幅度):
+      final = cosine + 0.04 * log10(count + 1)
+      用加法而非乘法是因为乘法会把高频标签强行推到前面
+      (mana sink 在"保护我的指挥官"语境下 cosine 0.535 × 频率项就压过
+      gives protection 0.542,这是错的),加法温和得多。
+
+    返回 [{tag, zh, n, score}],score 为重排后的 final 值。
+    """
+    q = (q or "").strip()
+    if not q:
+        return {"items": [], "expanded": ""}
+
+    eq, _extras = expand_query(q)
+    emb = _load_tag_emb()
+    qv = _np.asarray(list(model().embed([eq]))[0], dtype=_np.float32)
+    qv /= (_np.linalg.norm(qv) + 1e-9)
+
+    sims = emb["vecs"] @ qv  # (N,)
+    min_sim = max(0.0, min(1.0, min_sim))
+    cand_idx = _np.where(sims >= min_sim)[0]
+    if cand_idx.size == 0:
+        return {"items": [], "expanded": eq}
+    # 频率加法加权
+    w = 0.04 * _np.log10(emb["counts"][cand_idx].astype(_np.float32) + 1.0)
+    final = sims[cand_idx] + w
+
+    # 黑话展开里直接出现 Tagger 标签名时给确定性加分(同卡搜索的标签召回路):
+    # "ETB" 展开为英文描述后只靠 cosine 软匹配,真标签(creaturefall)会被
+    # gives first strike 这类高频泛标签压过;展开文本含标签名即该概念的
+    # 确定性证据,平直 +0.2 压过频率项(最大约 0.15),具体先后仍由 cosine 区分。
+    eq_l = eq.lower()
+    bonus = _np.zeros(len(emb["tags"]), dtype=_np.float32)
+    for i, t in enumerate(emb["tags"]):
+        tl = t.lower()
+        if len(tl) >= 3 and t.isascii() and re.search(
+                r"(?<![a-z0-9-])" + re.escape(tl) + r"(?![a-z0-9-])", eq_l):
+            bonus[i] = 0.2
+    final = final + bonus[cand_idx]
+
+    order = _np.argsort(-final)
+    top_final = float(final[order[0]]) if order.size else 0.0
+    cutoff = top_final * max(0.0, min(1.0, drop_below))
+    kept = [j for j in order if float(final[j]) >= cutoff][:max(1, min(50, limit))]
+
+    items = []
+    for j in kept:
+        i = int(cand_idx[j])
+        items.append({
+            "tag": emb["tags"][i],
+            "zh": emb["zh"][i] if emb["zh"][i] else "",
+            "n": int(emb["counts"][i]),
+            "score": float(final[j]),
+        })
+    return {"items": items, "expanded": eq}
+
+
 _sets_map = None
 
 

@@ -135,13 +135,8 @@ def main():
             # AI 结构化元数据: 由 tag_cards.py 写入 tags.jsonl, merge_ai_tags.py 合入
             # 这些字段在 build_cards.py 阶段先以空值占位,保证下游管线 schema 稳定
             "ai_desc": "",                       # 40-60 字功能定位(嵌入核心)
-            "ai_tags": [],                       # 历史遗留(社区标签已替代主要标签)
-            "ai_synergy": [],                    # 历史遗留(被 ai_deck_role/strategy 取代)
-            "ai_deck_role": [],                  # [卡组角色] 枚举
-            "ai_strategy": [],                   # [策略主题] 枚举
-            "ai_countermeta": {"answers": [], "weak_to": []},  # 反制 meta
-            "ai_phase": "any",                   # early|mid|late|any
-            "ai_theme_keywords": [],             # 用户口里的中文俗称/联想词
+            "ai_tags": [],                       # 历史遗留(展示用,不再生产)
+            "ai_synergy": [],                    # 历史遗留(展示用,不再生产)
         }
 
         sf_faces = ((s or {}).get("card_faces")) or []
