@@ -96,12 +96,20 @@ function toggleTag(tag) {
           @click="state.mode = m.v; search()"
         >{{ m.t }}</button>
       </div>
-      <input
-        v-model="state.q"
-        class="min-w-56 flex-1 rounded-sm border border-line bg-panel2 px-3 py-2 text-sm text-parch placeholder-faint outline-none focus:border-golddim"
-        placeholder="中文 / 拼音首字母(如 ygj)/ 卡名,或描述效果:每当有生物死去时抓牌"
-        @keyup.enter="search()"
-      />
+      <div class="relative min-w-56 flex-1">
+        <input
+          v-model="state.q"
+          class="w-full rounded-sm border border-line bg-panel2 py-2 pl-3 pr-8 text-sm text-parch placeholder-faint outline-none focus:border-golddim"
+          placeholder="中文 / 拼音首字母(如 ygj)/ 卡名,或描述效果:每当有生物死去时抓牌"
+          @keyup.enter="search()"
+        />
+        <button
+          v-if="state.q"
+          class="absolute inset-y-0 right-0 flex w-8 items-center justify-center text-faint transition-colors hover:text-parch"
+          title="清除搜索词"
+          @click="state.q = ''; search()"
+        >✕</button>
+      </div>
       <button
         class="rounded-sm bg-gold px-4 py-2 text-xs font-bold tracking-widest text-ink hover:opacity-85"
         @click="search()"
