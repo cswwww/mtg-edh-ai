@@ -17,7 +17,8 @@ import urllib.request
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RAW = os.path.join(ROOT, "data", "raw")
-UA = {"User-Agent": "mtg-edh-ai-local-db/1.0 (personal research)"}
+UA = {"User-Agent": "mtg-edh-ai-local-db/1.0 (personal research)",
+       "Accept": "application/json,*/*"}
 
 WANT = {
     "oracle_cards": ("oracle-cards.jsonl.gz", True),
@@ -38,11 +39,14 @@ def download(url, dest_gz, is_json_array):
     tmp.close()
     try:
         req = urllib.request.Request(url, headers=UA)
-        with urllib.request.urlopen(req, timeout=300) as r, \
-                gzip.open(tmp.name, "wt", encoding="utf-8") as out:
-            if not is_json_array:
+        if not is_json_array:
+            # 服务器端已是 .jsonl.gz,直接落盘,不再二次压缩
+            with urllib.request.urlopen(req, timeout=300) as r, \
+                    open(tmp.name, "wb") as out:
                 shutil.copyfileobj(r, out, 1024 * 1024)
-            else:
+        else:
+            with urllib.request.urlopen(req, timeout=300) as r, \
+                    gzip.open(tmp.name, "wb") as out:
                 dec = json.JSONDecoder()
                 buf = ""
                 while True:
@@ -61,7 +65,7 @@ def download(url, dest_gz, is_json_array):
                             buf = ""
                             break
                         obj, end = dec.raw_decode(buf)
-                        out.write(json.dumps(obj, ensure_ascii=False) + "\n")
+                        out.write((json.dumps(obj, ensure_ascii=False) + "\n").encode("utf-8"))
                         buf = buf[end:]
         shutil.move(tmp.name, dest_gz)
         print(f"OK {os.path.basename(dest_gz)} <- {url}", flush=True)
@@ -73,7 +77,8 @@ def download(url, dest_gz, is_json_array):
 def main():
     os.makedirs(RAW, exist_ok=True)
     bulk = get_json("https://api.scryfall.com/bulk-data")
-    found = {d["type"]: d["download_uri"] for d in bulk.get("data") or []}
+    found = {d["type"]: (d.get("download_uri") or d.get("jsonl_download_uri"))
+             for d in bulk.get("data") or []}
     fail = 0
     for btype, (fname, is_arr) in WANT.items():
         url = found.get(btype)
@@ -86,6 +91,8 @@ def main():
         if os.path.exists(dest):
             shutil.copy2(dest, bak)  # 备份旧文件,失败可回滚
         try:
+            # bulk 数据现已统一为 .jsonl.gz;旧 JSON 数组格式按后缀自动识别
+            is_arr = not url.split("?")[0].endswith(".jsonl.gz")
             download(url, dest, is_arr)
         except Exception as e:
             if os.path.exists(bak):  # 恢复旧文件
