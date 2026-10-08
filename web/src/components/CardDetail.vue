@@ -9,13 +9,16 @@ watch(() => detail.value?.oracle_id, () => {
   faceIdx.value = 0
   showEnText.value = false
   lightbox.value = false
-  // 换卡时收掉弹窗并清空旧列表,防止再打开时展示上一张卡的残留数据
+  // 换卡时收掉弹窗并清空旧列表与弹窗内筛选,防止再打开时展示上一张卡的残留数据
   similarOpen.value = false
   similar.value = []
   similarTotal.value = 0
   similarNumTags.value = 0
   similarPage.value = 1
   similarFor.value = ''
+  simCi.value = []
+  simCiColorless.value = false
+  simTypes.value = []
   loadEdhrec()
   loadMtgstocks()
 })
@@ -189,6 +192,47 @@ const similarLoading = ref(false)
 const similarError = ref('')
 const similarFor = ref('')   // 当前列表属于哪张卡,换卡后失效
 const SIM_PAGE_SIZE = 24
+// 弹窗内筛选:指挥官颜色(标识色 ⊆ 所选)、卡牌类型(多选为交集)
+const simCi = ref([])
+const simCiColorless = ref(false)
+const simTypes = ref([])
+const SIM_TYPES = [
+  { t: 'Creature', zh: '生物' }, { t: 'Sorcery', zh: '法术' },
+  { t: 'Instant', zh: '瞬间' }, { t: 'Enchantment', zh: '结界' },
+  { t: 'Artifact', zh: '神器' }, { t: 'Land', zh: '地' },
+  { t: 'Planeswalker', zh: '鹏洛客' },
+]
+const simColors = [
+  { c: 'W', label: '白' }, { c: 'U', label: '蓝' }, { c: 'B', label: '黑' },
+  { c: 'R', label: '红' }, { c: 'G', label: '绿' },
+]
+const simFilterActive = computed(() =>
+  simCi.value.length > 0 || simCiColorless.value || simTypes.value.length > 0)
+
+function reloadSimilar() {
+  loadSimilarPage(1)
+}
+
+function toggleSimCi(c) {
+  const i = simCi.value.indexOf(c)
+  if (i >= 0) simCi.value.splice(i, 1)
+  else simCi.value.push(c)
+  reloadSimilar()
+}
+
+function toggleSimType(t) {
+  const i = simTypes.value.indexOf(t)
+  if (i >= 0) simTypes.value.splice(i, 1)
+  else simTypes.value.push(t)
+  reloadSimilar()
+}
+
+function clearSimFilters() {
+  simCi.value = []
+  simCiColorless.value = false
+  simTypes.value = []
+  reloadSimilar()
+}
 
 async function loadSimilarPage(page) {
   const oid = detail.value?.oracle_id
@@ -196,7 +240,13 @@ async function loadSimilarPage(page) {
   similarLoading.value = true
   similarError.value = ''
   try {
-    const r = await fetch(`/api/similar/${oid}?page=${page}&page_size=${SIM_PAGE_SIZE}`)
+    const p = new URLSearchParams()
+    p.set('page', page)
+    p.set('page_size', SIM_PAGE_SIZE)
+    if (simCi.value.length) p.set('ci', simCi.value.join(','))
+    if (simCiColorless.value) p.set('ci_colorless', '1')
+    if (simTypes.value.length) p.set('type', simTypes.value.join(','))
+    const r = await fetch(`/api/similar/${oid}?` + p.toString())
     if (!r.ok) throw new Error('HTTP ' + r.status)
     const d = await r.json()
     similarTotal.value = d.total
@@ -219,11 +269,14 @@ function openSimilar() {
   }
 }
 
-// 把标签条件带回主列表:并集语义,按 EDHREC 热度排序
+// 把标签 + 弹窗内的颜色/类型筛选带回主列表:并集语义,按 EDHREC 热度排序
 function viewAllSimilar() {
   state.tags = [...simTags.value]
   state.tagMode = 'or'
   state.sort = 'edhrec'
+  state.ciColors = [...simCi.value]
+  state.ciColorless = simCiColorless.value
+  state.types = [...simTypes.value]
   similarOpen.value = false
   closeDetail()
   search()
@@ -517,10 +570,49 @@ function searchByTag(t) {
             <button class="px-2 text-lg text-mute hover:text-gold" @click="similarOpen = false">✕</button>
           </div>
 
+          <!-- 筛选栏:指挥官颜色 + 卡牌类型 -->
+          <div class="space-y-1.5 border-b border-line px-4 py-2.5">
+            <div class="flex items-center gap-2">
+              <span class="w-14 shrink-0 text-[10px] tracking-[0.15em] text-faint">指挥官颜色</span>
+              <div class="flex flex-wrap gap-1">
+                <button
+                  v-for="m in simColors"
+                  :key="m.c"
+                  class="rounded-sm border px-2 py-0.5 text-[11px] transition-colors"
+                  :class="simCi.includes(m.c) ? 'border-golddim bg-golddim/40 font-bold text-gold' : 'border-line bg-panel2 text-mute hover:border-golddim hover:text-parch'"
+                  @click="toggleSimCi(m.c)"
+                >{{ m.label }}</button>
+                <button
+                  class="rounded-sm border px-2 py-0.5 text-[11px] transition-colors"
+                  :class="simCiColorless ? 'border-golddim bg-golddim/40 font-bold text-gold' : 'border-line bg-panel2 text-mute hover:border-golddim hover:text-parch'"
+                  title="未选颜色时:只显示无色牌 · 已选颜色时:无色牌始终包含(指挥官规则:无色可进任何套牌)"
+                  @click="simCiColorless = !simCiColorless; reloadSimilar()"
+                >无色</button>
+              </div>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="w-14 shrink-0 text-[10px] tracking-[0.15em] text-faint">卡牌类型</span>
+              <div class="flex flex-wrap gap-1">
+                <button
+                  v-for="m in SIM_TYPES"
+                  :key="m.t"
+                  class="rounded-sm border px-2 py-0.5 text-[11px] transition-colors"
+                  :class="simTypes.includes(m.t) ? 'border-golddim bg-golddim/40 font-bold text-gold' : 'border-line bg-panel2 text-mute hover:border-golddim hover:text-parch'"
+                  @click="toggleSimType(m.t)"
+                >{{ m.zh }}</button>
+                <button
+                  v-if="simFilterActive"
+                  class="rounded-sm border border-line px-2 py-0.5 text-[11px] text-faint transition-colors hover:border-golddim hover:text-gold"
+                  @click="clearSimFilters()"
+                >清空筛选</button>
+              </div>
+            </div>
+          </div>
+
           <div class="min-h-0 flex-1 overflow-y-auto p-4">
             <p v-if="similarLoading && !similar.length" class="py-8 text-center text-xs text-faint">查询中…</p>
             <p v-else-if="similarError" class="py-8 text-center text-xs text-faint">{{ similarError }}</p>
-            <p v-else-if="!similar.length" class="py-8 text-center text-xs text-faint">暂无共同标签的卡</p>
+            <p v-else-if="!similar.length" class="py-8 text-center text-xs text-faint">{{ simFilterActive ? '没有符合筛选条件的卡' : '暂无共同标签的卡' }}</p>
             <div v-else class="grid grid-cols-4 gap-3 sm:grid-cols-5 lg:grid-cols-6">
               <button
                 v-for="c in similar"

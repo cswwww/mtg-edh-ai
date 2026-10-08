@@ -720,36 +720,47 @@ def card_detail(oracle_id: str):
 
 
 # ---------------- 类似单卡(按共同标签数排序) ----------------
-_card_tags_map = None
-_card_rank_map = None
+_card_attr_map = None
 
 
-def card_tags_rank():
-    """{oracle_id: set(标签)} 与 {oracle_id: edhrec_rank},懒加载自 cards.jsonl。
-    标签 = sf_tags(社区标签) ∪ ai_tags(AI 标签),与 /api/search 的 tag 索引同口径。"""
-    global _card_tags_map, _card_rank_map
-    if _card_tags_map is None:
-        tags_map, rank_map = {}, {}
+def card_attr_map():
+    """{oracle_id: {tags, rank, ci, type}},懒加载自 cards.jsonl。
+    tags = sf_tags(社区标签) ∪ ai_tags(AI 标签),与 /api/search 的 tag 索引同口径;
+    ci = 指挥官标识色(空格拼接),type = 英文类型行,供弹窗的颜色/类型筛选。"""
+    global _card_attr_map
+    if _card_attr_map is None:
+        m = {}
         with open(os.path.join(ROOT, "data", "cards.jsonl"), encoding="utf-8") as f:
             for line in f:
                 c = json.loads(line)
-                tags_map[c["oracle_id"]] = (set(c.get("sf_tags") or [])
-                                            | set(c.get("ai_tags") or []))
-                rank_map[c["oracle_id"]] = c.get("edhrec_rank") or 9_999_999
-        _card_tags_map, _card_rank_map = tags_map, rank_map
-    return _card_tags_map, _card_rank_map
+                m[c["oracle_id"]] = {
+                    "tags": set(c.get("sf_tags") or []) | set(c.get("ai_tags") or []),
+                    "rank": c.get("edhrec_rank") or 9_999_999,
+                    "ci": " ".join(c.get("color_identity") or []),
+                    "type": c.get("type_line_en") or "",
+                }
+        _card_attr_map = m
+    return _card_attr_map
 
 
 @app.get("/api/similar/{oracle_id}")
-def similar_cards(oracle_id: str, page: int = 1, page_size: int = 60):
+def similar_cards(oracle_id: str, page: int = 1, page_size: int = 60,
+                  ci: str = "", ci_colorless: int = 0,
+                  type_: str = Query("", alias="type")):
     """类似单卡:与该卡有共同标签的卡,按共同标签数降序(相同则 EDHREC 排名靠前优先)。
 
     相似度 = 共同标签数 / 该卡标签数(即召回率:覆盖了这张卡多少标签)。
-    每个结果带 shared(共同标签数)、similarity(0-1)、shared_tags(共同标签列表)。"""
-    tags_map, rank_map = card_tags_rank()
-    tags = tags_map.get(oracle_id)
-    if tags is None:
+    每个结果带 shared(共同标签数)、similarity(0-1)、shared_tags(共同标签列表)。
+    可选筛选(在排序后分页前应用):
+      ci            指挥官颜色多选(逗号分隔),标识色 ⊆ 所选;按指挥官规则,
+                    只要选了颜色,无色牌始终放行(可进任何套牌)
+      ci_colorless  仅未选颜色时有意义:只查无色牌
+      type          卡牌类型多选(逗号分隔,中英文均可),多选为交集(如 生物+神器)。"""
+    attr = card_attr_map()
+    cur = attr.get(oracle_id)
+    if cur is None:
         raise HTTPException(404, "card not found")
+    tags = cur["tags"]
     if not tags:
         return {"total": 0, "page": 1, "page_size": page_size,
                 "items": [], "num_tags": 0}
@@ -759,8 +770,34 @@ def similar_cards(oracle_id: str, page: int = 1, page_size: int = 60):
         for oid in idx.get(t, ()):  # 该标签下的全部卡,逐个累加共同标签数
             counts[oid] = counts.get(oid, 0) + 1
     counts.pop(oracle_id, None)  # 排除卡本身
-    ranked = sorted(counts.items(),
-                    key=lambda kv: (-kv[1], rank_map.get(kv[0], 9_999_999)))
+
+    # ---- 颜色/类型筛选 ----
+    ci_sel = {c for c in ci.upper() if c in "WUBRG"}
+    type_sel = [TYPE_ZH2EN.get(t.strip(), t.strip())
+                for t in type_.split(",") if t.strip()]
+
+    def keep(oid):
+        a = attr.get(oid)
+        if a is None:
+            return False
+        if ci_sel:
+            # 指挥官规则:无色牌(ci 为空)可进任何套牌,选色时始终放行;
+            # 有色牌要求标识色 ⊆ 所选
+            cis = set(a["ci"].split())
+            if cis and not cis <= ci_sel:
+                return False
+        elif ci_colorless:
+            # 未选颜色但勾了无色:只查无色牌
+            if a["ci"].split():
+                return False
+        if type_sel:
+            tl = a["type"].lower()
+            if not all(t.lower() in tl for t in type_sel):
+                return False
+        return True
+
+    ranked = sorted(((oid, n) for oid, n in counts.items() if keep(oid)),
+                    key=lambda kv: (-kv[1], attr[kv[0]]["rank"]))
     total = len(ranked)
     page = max(1, page)
     page_size = min(200, max(1, page_size))
@@ -780,7 +817,7 @@ def similar_cards(oracle_id: str, page: int = 1, page_size: int = 60):
             r.pop("text", None)
             r["shared"] = n
             r["similarity"] = round(n / len(tags), 4)
-            r["shared_tags"] = sorted(tags & tags_map[oid])
+            r["shared_tags"] = sorted(tags & attr[oid]["tags"])
             items.append(r)
     return {"total": total, "page": page, "page_size": page_size,
             "items": items, "num_tags": len(tags)}
