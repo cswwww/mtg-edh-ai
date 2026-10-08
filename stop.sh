@@ -18,7 +18,17 @@ fi
 if ! kill -0 "$pid" 2>/dev/null; then
   rm -f "$PID_FILE"
   echo "Web 服务未运行，已清理过期 PID 文件"
-  exit 0
+fi
+
+# 清理可能残留的 API 后端(8103),防止 vite 重启后"沿用旧后端"导致代码不生效
+backend_pid="$(lsof -tnP -iTCP:8103 -sTCP:LISTEN 2>/dev/null || true)"
+if [[ -n "$backend_pid" ]]; then
+  kill -TERM $backend_pid 2>/dev/null || true
+  for _ in {1..5}; do
+    kill -0 $backend_pid 2>/dev/null || break
+    sleep 1
+  done
+  kill -KILL $backend_pid 2>/dev/null || true
 fi
 
 process_tree() {

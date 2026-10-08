@@ -1,6 +1,6 @@
 <script setup>
 import { onMounted, computed } from 'vue'
-import { state, search, loadMeta } from './store'
+import { state, search, loadMeta, route, go } from './store'
 import SearchBar from './components/SearchBar.vue'
 import FilterPanel from './components/FilterPanel.vue'
 import CardGrid from './components/CardGrid.vue'
@@ -8,6 +8,7 @@ import CardDetail from './components/CardDetail.vue'
 import SlangPanel from './components/SlangPanel.vue'
 import TagPicker from './components/TagPicker.vue'
 import TypePicker from './components/TypePicker.vue'
+import DeckView from './components/DeckView.vue'
 
 onMounted(() => {
   loadMeta()
@@ -46,51 +47,70 @@ function toggleMode() {
   <div class="flex h-screen flex-col">
     <header class="flex items-center gap-4 border-b border-line bg-panel px-4 py-3">
       <div class="shrink-0">
-        <h1 class="font-display text-lg font-bold leading-none tracking-wide text-parch">
-          早晚能找到卡
-        </h1>
-        <p class="mt-1 text-[10px] text-faint">中午就午休</p>
+        <template v-if="route === 'home'">
+          <h1 class="font-display text-lg font-bold leading-none tracking-wide text-parch">
+            <button class="transition-colors hover:text-gold" title="标签找卡主页" @click="go('home')">早晚能找到卡</button>
+          </h1>
+          <p class="mt-1 text-[10px]">
+            <button class="text-faint transition-colors hover:text-gold" title="切换到牌表标签分析" @click="go('deck')">中午就午休</button>
+          </p>
+        </template>
+        <template v-else>
+          <h1 class="font-display text-lg font-bold leading-none tracking-wide text-parch">
+            <button class="transition-colors hover:text-gold" title="牌表标签分析页" @click="go('deck')">中午就午休</button>
+          </h1>
+          <p class="mt-1 text-[10px]">
+            <button class="text-faint transition-colors hover:text-gold" title="回到标签找卡主页" @click="go('home')">早晚能找到卡</button>
+          </p>
+        </template>
       </div>
-      <div class="min-w-0 flex-1"><SearchBar /></div>
+      <div v-if="route === 'home'" class="min-w-0 flex-1"><SearchBar /></div>
+      <div v-else class="min-w-0 flex-1 text-[11px] text-faint">
+        粘贴指挥官牌表,按 Tagger 标签拆解分析(点左上「早晚能找到卡」回主页)
+      </div>
     </header>
 
-    <!-- 标签筛选:点击打开标签选择弹窗 -->
-    <div class="flex items-center gap-1.5 border-b border-line bg-panel px-4 py-1.5">
-      <button
-        class="shrink-0 rounded-sm border px-2.5 py-1 text-[11px] tracking-widest transition-colors"
-        :class="state.tags.length
-          ? 'border-golddim bg-golddim/40 font-bold text-gold'
-          : 'border-line bg-panel2 text-mute hover:border-golddim hover:text-parch'"
-        @click="state.tagPickerOpen = true"
-      >标签筛选{{ state.tags.length ? ` · ${state.tags.length}` : '' }}</button>
-      <button
-        class="shrink-0 rounded-sm border px-1.5 py-1 font-num text-[11px] font-bold transition-colors"
-        :class="state.tagMode === 'and'
-          ? 'border-golddim bg-golddim/40 text-gold'
-          : 'border-line bg-panel2 text-mute hover:text-parch'"
-        :title="state.tagMode === 'and' ? '当前为交集(同时命中),点击切换为并集' : '当前为并集(命中任一),点击切换为交集'"
-        @click="toggleMode()"
-      >{{ state.tagMode === 'and' ? '∩' : '∪' }}</button>
-      <div v-if="selectedTags.length" class="flex min-w-0 items-center gap-1.5 overflow-x-auto">
+    <template v-if="route === 'home'">
+      <!-- 标签筛选:点击打开标签选择弹窗 -->
+      <div class="flex items-center gap-1.5 border-b border-line bg-panel px-4 py-1.5">
         <button
-          v-for="(label, i) in selectedTags"
-          :key="state.tags[i]"
-          class="shrink-0 rounded-sm border border-golddim bg-golddim/40 px-2 py-0.5 text-[10px] font-bold text-gold"
-          :title="state.tags[i]"
-          @click="toggleTag(state.tags[i])"
-        >{{ label }} ✕</button>
+          class="shrink-0 rounded-sm border px-2.5 py-1 text-[11px] tracking-widest transition-colors"
+          :class="state.tags.length
+            ? 'border-golddim bg-golddim/40 font-bold text-gold'
+            : 'border-line bg-panel2 text-mute hover:border-golddim hover:text-parch'"
+          @click="state.tagPickerOpen = true"
+        >标签筛选{{ state.tags.length ? ` · ${state.tags.length}` : '' }}</button>
         <button
-          class="shrink-0 px-2 py-0.5 text-[10px] text-faint transition-colors hover:text-gold"
-          @click="clearTags()"
-        >清空</button>
+          class="shrink-0 rounded-sm border px-1.5 py-1 font-num text-[11px] font-bold transition-colors"
+          :class="state.tagMode === 'and'
+            ? 'border-golddim bg-golddim/40 text-gold'
+            : 'border-line bg-panel2 text-mute hover:text-parch'"
+          :title="state.tagMode === 'and' ? '当前为交集(同时命中),点击切换为并集' : '当前为并集(命中任一),点击切换为交集'"
+          @click="toggleMode()"
+        >{{ state.tagMode === 'and' ? '∩' : '∪' }}</button>
+        <div v-if="selectedTags.length" class="flex min-w-0 items-center gap-1.5 overflow-x-auto">
+          <button
+            v-for="(label, i) in selectedTags"
+            :key="state.tags[i]"
+            class="shrink-0 rounded-sm border border-golddim bg-golddim/40 px-2 py-0.5 text-[10px] font-bold text-gold"
+            :title="state.tags[i]"
+            @click="toggleTag(state.tags[i])"
+          >{{ label }} ✕</button>
+          <button
+            class="shrink-0 px-2 py-0.5 text-[10px] text-faint transition-colors hover:text-gold"
+            @click="clearTags()"
+          >清空</button>
+        </div>
+        <span v-else class="text-[10px] text-faint">多选支持交集 / 并集,点击打开选择器</span>
       </div>
-      <span v-else class="text-[10px] text-faint">多选支持交集 / 并集,点击打开选择器</span>
-    </div>
 
-    <div class="flex min-h-0 flex-1">
-      <FilterPanel />
-      <CardGrid />
-    </div>
+      <div class="flex min-h-0 flex-1">
+        <FilterPanel />
+        <CardGrid />
+      </div>
+    </template>
+
+    <DeckView v-else />
 
     <CardDetail />
     <SlangPanel />

@@ -1,5 +1,14 @@
 import { reactive, ref, watch } from 'vue'
 
+// ---------------- 路由(hash):#/ 标签找卡主页,#/deck 牌表标签分析 ----------------
+export const route = ref(window.location.hash === '#/deck' ? 'deck' : 'home')
+window.addEventListener('hashchange', () => {
+  route.value = window.location.hash === '#/deck' ? 'deck' : 'home'
+})
+export function go(r) {
+  window.location.hash = r === 'deck' ? '/deck' : '/'
+}
+
 const SAVED_SIZE = localStorage.getItem('mtg-view-size')
 const VALID_SIZES = ['S', 'M', 'L', 'LIST']
 

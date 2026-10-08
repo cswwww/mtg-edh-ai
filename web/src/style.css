@@ -70,3 +70,19 @@ body {
   font-family: var(--font-body);
   box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.35);
 }
+
+/* 可交互控件统一指针光标(按钮已被 Tailwind preflight 覆盖,这里兜底其它原生控件) */
+button,
+[role="button"],
+a[href],
+select,
+summary,
+label {
+  cursor: pointer;
+}
+
+/* 禁用的控件恢复默认光标 */
+button:disabled,
+select:disabled {
+  cursor: default;
+}

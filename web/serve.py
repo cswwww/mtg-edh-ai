@@ -7,6 +7,7 @@
       &commander=1&keyword=&page=1&page_size=60&sort=rel|edhrec|cmc_asc|cmc_desc|name
   GET /api/card/{oracle_id}
   GET /api/meta
+  POST /api/deck   {text: "1 Sol Ring\n..."} -> 牌表按卡名匹配,返回标签信息
 """
 import argparse
 import json
@@ -717,6 +718,130 @@ def card_detail(oracle_id: str):
         card.get("image_url") or "")
     card["sf_id"] = m.group(1) if m else None
     return card
+
+
+# ---------------- 牌表解析(指挥官牌表 -> 按标签可视化) ----------------
+_deck_name_map = None
+
+
+def deck_name_map():
+    """{norm_name: card_dict},懒加载自 cards.jsonl,供牌表按卡名精确匹配。
+    同时收集中文名与英文名(去重时同名不同版本保留先遇到的即可,同 oracle 卡)。 """
+    global _deck_name_map
+    if _deck_name_map is None:
+        m = {}
+        with open(os.path.join(ROOT, "data", "cards.jsonl"), encoding="utf-8") as f:
+            for line in f:
+                c = json.loads(line)
+                for key in (_norm_name(c.get("name_en")), _norm_name(c.get("name_zh"))):
+                    if key and key not in m:
+                        m[key] = c
+        _deck_name_map = m
+    return _deck_name_map
+
+
+_DECK_LINE = re.compile(r"^(?:SB:\s*)?(\d+)\s*[x×]?\s+(.+?)\s*$")
+_DECK_TRAIL = re.compile(r"\s*(?:\([^)]*\)|\[[^\]]*\]|\{\w+\})?\s*[-#]?\s*(?:\d+)?\s*$")
+# 无 # 前缀的分区标题行(如 moxfield 导出的 "Commander" / "Deck")
+_DECK_SECTIONS = {
+    "commander": "commander", "commanders": "commander", "主将": "commander",
+    "指挥官": "commander", "deck": "deck", "main": "deck", "maindeck": "deck",
+    "套牌": "deck", "主牌": "deck", "sideboard": "sideboard", "sb": "sideboard",
+    "备牌": "sideboard",
+}
+# 常见俗名/误写 -> 库内官方中文名
+_DECK_ALIAS = {"森林": "树林"}
+
+
+def parse_deck_lines(text):
+    """把牌表文本解析为 [{qty, name, section}];支持 1x Name / Name (SET) 123 /
+    分区标题(Commander/指挥官/Deck 等,有无 # 均可)与 #、// 注释行。 """
+    out = []
+    section = "deck"
+    for raw in (text or "").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("//"):
+            continue
+        if line.startswith("#") and not _DECK_LINE.match(line):
+            section = re.sub(r"^#+\s*", "", line).strip().lower()
+            continue
+        m = _DECK_LINE.match(line)
+        qty = 1
+        if m:
+            qty, line = int(m.group(1)), m.group(2).strip()
+        head = line.rstrip(":：").strip().lower()
+        if head in _DECK_SECTIONS:
+            section = _DECK_SECTIONS[head]
+            continue
+        # 去掉行尾版本标注: (C21) 354 / [CLB] / *F* 等,迭代去干净
+        prev = None
+        while prev != line:
+            prev = line
+            line = _DECK_TRAIL.sub(" ", line).strip()
+        if line:
+            out.append({"qty": qty, "name": line, "section": section})
+    return out
+
+
+def deck_match(name, pool_map):
+    """先精确匹配(规范化中/英文名,含俗名别名表),失败则 difflib 模糊纠错。"""
+    s = _norm_name(name)
+    if not s:
+        return None, False
+    if s in _DECK_ALIAS:
+        s = _norm_name(_DECK_ALIAS[s])
+    if s in pool_map:
+        return pool_map[s], False
+    if len(s) >= 4:
+        close = difflib.get_close_matches(s, list(pool_map.keys()), n=1, cutoff=0.85)
+        if close:
+            return pool_map[close[0]], True
+    return None, False
+
+
+@app.post("/api/deck")
+def deck_parse(body: dict):
+    """接收牌表文本,返回每张卡的标签信息(社区 sf_tags 优先,AI 标签兜底)。"""
+    entries = parse_deck_lines(body.get("text", ""))
+    pool = deck_name_map()
+    cards, unmatched = [], []
+    seen = {}
+    for e in entries:
+        card, fuzzy = deck_match(e["name"], pool)
+        if card is None:
+            unmatched.append(e["name"])
+            continue
+        oid = card["oracle_id"]
+        if oid in seen:
+            seen[oid]["qty"] += e["qty"]
+            continue
+        item = {
+            "oracle_id": oid,
+            "qty": e["qty"],
+            "name_en": card.get("name_en"),
+            "name_zh": card.get("name_zh"),
+            "image_url": card.get("image_url"),
+            "art_crop": card.get("art_crop"),
+            "mana_cost": card.get("mana_cost"),
+            "colors": card.get("colors") or [],
+            "color_identity": card.get("color_identity") or [],
+            "cmc": card.get("cmc"),
+            "type_line_en": card.get("type_line_en"),
+            "type_line_zh": card.get("type_line_zh"),
+            "rarity": card.get("rarity"),
+            "edhrec_rank": card.get("edhrec_rank"),
+            "sf_tags": card.get("sf_tags") or [],
+            "ai_tags": card.get("ai_tags") or [],
+            "is_commander": e["section"] in ("commander", "commanders", "指挥官", "主将"),
+            "fuzzy": fuzzy,
+            "input_name": e["name"],
+        }
+        seen[oid] = item
+        cards.append(item)
+    cards.sort(key=lambda c: (not c["is_commander"],
+                              c["edhrec_rank"] or 9_999_999))
+    return {"cards": cards, "unmatched": unmatched,
+            "total_qty": sum(c["qty"] for c in cards)}
 
 
 # ---------------- 类似单卡(按共同标签数排序) ----------------

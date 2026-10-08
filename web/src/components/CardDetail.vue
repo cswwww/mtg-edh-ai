@@ -294,7 +294,7 @@ function searchByTag(t) {
 <template>
   <div v-if="detail || true" class="pointer-events-none fixed inset-0 z-50">
     <div
-      class="absolute inset-0 bg-black/50 transition-opacity"
+      class="absolute inset-0 cursor-pointer bg-black/50 transition-opacity"
       :class="detail ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0'"
       @click="closeDetail()"
     ></div>
@@ -556,7 +556,7 @@ function searchByTag(t) {
         v-if="similarOpen && detail"
         class="pointer-events-auto fixed inset-0 z-[65] flex items-center justify-center p-4"
       >
-        <div class="absolute inset-0 bg-black/60" @click="similarOpen = false"></div>
+        <div class="absolute cursor-pointer inset-0 bg-black/60" @click="similarOpen = false"></div>
         <div class="relative flex max-h-[86vh] w-[54rem] max-w-full flex-col rounded-md border border-line bg-panel shadow-2xl">
           <div class="flex items-start justify-between gap-3 border-b border-line px-4 py-3">
             <div class="min-w-0">

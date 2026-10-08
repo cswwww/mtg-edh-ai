@@ -69,7 +69,7 @@ function label(t) {
 
 <template>
   <div v-if="open" class="fixed inset-0 z-50 flex items-center justify-center p-4">
-    <div class="absolute inset-0 bg-black/60" @click="open = false"></div>
+    <div class="absolute cursor-pointer inset-0 bg-black/60" @click="open = false"></div>
     <div class="relative flex max-h-[85vh] w-[42rem] max-w-full flex-col rounded-sm border border-line bg-panel shadow-2xl">
       <div class="flex items-start justify-between border-b border-line p-4">
         <div>
