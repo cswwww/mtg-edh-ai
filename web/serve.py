@@ -722,6 +722,7 @@ def card_detail(oracle_id: str):
 
 # ---------------- 牌表解析(指挥官牌表 -> 按标签可视化) ----------------
 _deck_name_map = None
+_deck_face_map = None
 
 
 def deck_name_map():
@@ -738,6 +739,31 @@ def deck_name_map():
                         m[key] = c
         _deck_name_map = m
     return _deck_name_map
+
+
+def deck_face_map():
+    """{norm_face_name: card_dict},双面/ split 牌各面名称索引,供整牌名("A // B")
+    没写全时按面名兜底命中整卡。面名来源:faces 字段;无 faces 的 prepare 等
+    layout 直接从整牌名按 " // " 拆分。faces/拆分顺序即正背面,冲突保留先遇到的。"""
+    global _deck_face_map
+    if _deck_face_map is None:
+        m = {}
+        with open(os.path.join(ROOT, "data", "cards.jsonl"), encoding="utf-8") as f:
+            for line in f:
+                c = json.loads(line)
+                faces = c.get("faces") or []
+                raw_names = []
+                for face in faces:
+                    raw_names += [face.get("name_en"), face.get("name_zh")]
+                if not faces and "//" in (c.get("name_en") or ""):
+                    raw_names += re.split(r"\s*//\s*", c["name_en"])
+                    raw_names += re.split(r"\s*//\s*", c.get("name_zh") or "")
+                for rn in raw_names:
+                    key = _norm_name(rn)
+                    if key and key not in m:
+                        m[key] = c
+        _deck_face_map = m
+    return _deck_face_map
 
 
 _DECK_LINE = re.compile(r"^(?:SB:\s*)?(\d+)\s*[x×]?\s+(.+?)\s*$")
@@ -792,6 +818,10 @@ def deck_match(name, pool_map):
         s = _norm_name(_DECK_ALIAS[s])
     if s in pool_map:
         return pool_map[s], False
+    # 双面牌:整牌名("A // B")没写全时,按正面/背面名单独命中整卡
+    fm = deck_face_map()
+    if s in fm:
+        return fm[s], False
     if len(s) >= 4:
         close = difflib.get_close_matches(s, list(pool_map.keys()), n=1, cutoff=0.85)
         if close:
