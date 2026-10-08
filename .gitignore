@@ -13,6 +13,7 @@ web/dist/
 # vite 依赖预构建缓存
 .vite/
 *.log
+.mtg-edh-ai-web.pid
 
 # ---- 生成的数据(体积大,可由 scripts/ 重新构建) ----
 data/raw/

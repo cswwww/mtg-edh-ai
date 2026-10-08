@@ -719,6 +719,73 @@ def card_detail(oracle_id: str):
     return card
 
 
+# ---------------- 类似单卡(按共同标签数排序) ----------------
+_card_tags_map = None
+_card_rank_map = None
+
+
+def card_tags_rank():
+    """{oracle_id: set(标签)} 与 {oracle_id: edhrec_rank},懒加载自 cards.jsonl。
+    标签 = sf_tags(社区标签) ∪ ai_tags(AI 标签),与 /api/search 的 tag 索引同口径。"""
+    global _card_tags_map, _card_rank_map
+    if _card_tags_map is None:
+        tags_map, rank_map = {}, {}
+        with open(os.path.join(ROOT, "data", "cards.jsonl"), encoding="utf-8") as f:
+            for line in f:
+                c = json.loads(line)
+                tags_map[c["oracle_id"]] = (set(c.get("sf_tags") or [])
+                                            | set(c.get("ai_tags") or []))
+                rank_map[c["oracle_id"]] = c.get("edhrec_rank") or 9_999_999
+        _card_tags_map, _card_rank_map = tags_map, rank_map
+    return _card_tags_map, _card_rank_map
+
+
+@app.get("/api/similar/{oracle_id}")
+def similar_cards(oracle_id: str, page: int = 1, page_size: int = 60):
+    """类似单卡:与该卡有共同标签的卡,按共同标签数降序(相同则 EDHREC 排名靠前优先)。
+
+    相似度 = 共同标签数 / 该卡标签数(即召回率:覆盖了这张卡多少标签)。
+    每个结果带 shared(共同标签数)、similarity(0-1)、shared_tags(共同标签列表)。"""
+    tags_map, rank_map = card_tags_rank()
+    tags = tags_map.get(oracle_id)
+    if tags is None:
+        raise HTTPException(404, "card not found")
+    if not tags:
+        return {"total": 0, "page": 1, "page_size": page_size,
+                "items": [], "num_tags": 0}
+    idx = tag_index()
+    counts = {}
+    for t in tags:
+        for oid in idx.get(t, ()):  # 该标签下的全部卡,逐个累加共同标签数
+            counts[oid] = counts.get(oid, 0) + 1
+    counts.pop(oracle_id, None)  # 排除卡本身
+    ranked = sorted(counts.items(),
+                    key=lambda kv: (-kv[1], rank_map.get(kv[0], 9_999_999)))
+    total = len(ranked)
+    page = max(1, page)
+    page_size = min(200, max(1, page_size))
+    chunk = ranked[(page - 1) * page_size: page * page_size]
+    items = []
+    if chunk:
+        id_list = ", ".join(f"'{o}'" for o, _ in chunk)
+        rows = {r["oracle_id"]: r for r in
+                tbl.search().where(f"oracle_id IN ({id_list})")
+                .limit(len(chunk)).to_list()}
+        for oid, n in chunk:
+            r = rows.get(oid)
+            if not r:
+                continue
+            r.pop("vector", None)
+            r.pop("card", None)
+            r.pop("text", None)
+            r["shared"] = n
+            r["similarity"] = round(n / len(tags), 4)
+            r["shared_tags"] = sorted(tags & tags_map[oid])
+            items.append(r)
+    return {"total": total, "page": page, "page_size": page_size,
+            "items": items, "num_tags": len(tags)}
+
+
 # ---------------- EDHREC 主将使用率 ----------------
 import functools
 import re as _re

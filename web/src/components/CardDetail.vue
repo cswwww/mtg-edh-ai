@@ -1,6 +1,6 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
-import { detail, closeDetail, state } from '../store'
+import { detail, closeDetail, state, openDetail, search } from '../store'
 import ManaText from './ManaText.vue'
 
 const faceIdx = ref(0)
@@ -9,6 +9,13 @@ watch(() => detail.value?.oracle_id, () => {
   faceIdx.value = 0
   showEnText.value = false
   lightbox.value = false
+  // 换卡时收掉弹窗并清空旧列表,防止再打开时展示上一张卡的残留数据
+  similarOpen.value = false
+  similar.value = []
+  similarTotal.value = 0
+  similarNumTags.value = 0
+  similarPage.value = 1
+  similarFor.value = ''
   loadEdhrec()
   loadMtgstocks()
 })
@@ -145,9 +152,12 @@ function msYear(ts) { return new Date(ts).getUTCFullYear() }
 const priceUsd = computed(() => detail.value?.prices?.usd || detail.value?.prices?.usd_foil)
 const rarityZh = { common: '普通', uncommon: '非普通', rare: '稀有', mythic: '秘稀' }
 
-// 卡图大图查看器
+// 卡图大图查看器 / 类似单卡弹窗打开时锁定页面滚动
 const lightbox = ref(false)
-watch(lightbox, v => { document.body.style.overflow = v ? 'hidden' : '' })
+const similarOpen = ref(false)
+watch([lightbox, similarOpen], ([lb, sim]) => {
+  document.body.style.overflow = (lb || sim) ? 'hidden' : ''
+})
 
 // 版本 -> Scryfall 精确搜索页(该系列中的这张卡)
 function setLink(s) {
@@ -164,6 +174,68 @@ function setTitle(s) {
 const hasAiMeta = computed(() => {
   return !!(detail.value?.ai_desc)
 })
+
+// ---- 类似单卡:弹窗展示,按共同标签数排序(相似度 = 共同标签 / 当前卡标签数) ----
+const simTags = computed(() => {
+  const d = detail.value
+  if (!d) return []
+  return [...new Set([...(d.sf_tags || []), ...(d.ai_tags || [])])]
+})
+const similar = ref([])
+const similarTotal = ref(0)
+const similarNumTags = ref(0)
+const similarPage = ref(1)
+const similarLoading = ref(false)
+const similarError = ref('')
+const similarFor = ref('')   // 当前列表属于哪张卡,换卡后失效
+const SIM_PAGE_SIZE = 24
+
+async function loadSimilarPage(page) {
+  const oid = detail.value?.oracle_id
+  if (!oid) return
+  similarLoading.value = true
+  similarError.value = ''
+  try {
+    const r = await fetch(`/api/similar/${oid}?page=${page}&page_size=${SIM_PAGE_SIZE}`)
+    if (!r.ok) throw new Error('HTTP ' + r.status)
+    const d = await r.json()
+    similarTotal.value = d.total
+    similarNumTags.value = d.num_tags
+    similar.value = page === 1 ? d.items : similar.value.concat(d.items)
+    similarPage.value = page
+    similarFor.value = oid
+  } catch (e) {
+    similarError.value = '类似单卡查询失败'
+  } finally {
+    similarLoading.value = false
+  }
+}
+
+function openSimilar() {
+  similarOpen.value = true
+  // 列表为空或不是当前卡的(理论上换卡时已清空,这里兜底)才重新加载
+  if (similarFor.value !== detail.value?.oracle_id || !similar.value.length) {
+    loadSimilarPage(1)
+  }
+}
+
+// 把标签条件带回主列表:并集语义,按 EDHREC 热度排序
+function viewAllSimilar() {
+  state.tags = [...simTags.value]
+  state.tagMode = 'or'
+  state.sort = 'edhrec'
+  similarOpen.value = false
+  closeDetail()
+  search()
+}
+
+// 点单个标签 chip:按该标签查询(无搜索词时即按 EDHREC 排序的全量列表)
+function searchByTag(t) {
+  state.tags = [t]
+  state.tagMode = 'or'
+  closeDetail()
+  search()
+}
 </script>
 
 <template>
@@ -299,16 +371,24 @@ const hasAiMeta = computed(() => {
 
           <!-- Scryfall Tagger 社区标签 -->
           <div v-if="detail.sf_tags?.length" class="mt-5">
-            <p class="mb-1.5 text-[10px] tracking-[0.2em] text-faint">SCRYFALL TAGGER · 社区标签</p>
+            <p class="mb-1.5 text-[10px] tracking-[0.2em] text-faint">SCRYFALL TAGGER · 社区标签(点击按标签查询)</p>
             <div class="flex flex-wrap gap-1">
-              <span
+              <button
                 v-for="t in detail.sf_tags"
                 :key="t"
-                :title="t"
-                class="rounded-sm border border-line bg-panel2 px-1.5 py-0.5 text-[10px] text-mute"
-              >{{ state.meta?.tagdict?.[t] || t }}</span>
+                :title="t + ' · 点击查询带此标签的卡'"
+                class="rounded-sm border border-line bg-panel2 px-1.5 py-0.5 text-[10px] text-mute transition-colors hover:border-golddim hover:text-gold"
+                @click="searchByTag(t)"
+              >{{ state.meta?.tagdict?.[t] || t }}</button>
             </div>
           </div>
+
+          <!-- 类似单卡:点击弹窗展示,按共同标签数排序 -->
+          <button
+            v-if="simTags.length"
+            class="mt-5 w-full rounded-sm border border-line bg-panel2 px-2 py-1.5 text-[11px] tracking-[0.15em] text-mute transition-colors hover:border-golddim hover:text-gold"
+            @click="openSimilar()"
+          >⚭ 类似单卡 · 按 {{ simTags.length }} 个标签查找</button>
 
           <!-- AI 功能定位(LLM 一句话) -->
           <div v-if="hasAiMeta" class="mt-5">
@@ -414,6 +494,80 @@ const hasAiMeta = computed(() => {
           class="max-h-full max-w-full rounded-[6px] shadow-2xl"
         />
         <p class="absolute bottom-4 left-1/2 -translate-x-1/2 text-xs text-faint">点击任意处关闭 · 当前面: {{ cur?.name_zh || cur?.name_en || detail.name_zh || detail.name_en }}</p>
+      </div>
+    </Teleport>
+
+    <!-- 类似单卡弹窗(页面居中,按共同标签数排序) -->
+    <Teleport to="body">
+      <div
+        v-if="similarOpen && detail"
+        class="pointer-events-auto fixed inset-0 z-[65] flex items-center justify-center p-4"
+      >
+        <div class="absolute inset-0 bg-black/60" @click="similarOpen = false"></div>
+        <div class="relative flex max-h-[86vh] w-[54rem] max-w-full flex-col rounded-md border border-line bg-panel shadow-2xl">
+          <div class="flex items-start justify-between gap-3 border-b border-line px-4 py-3">
+            <div class="min-w-0">
+              <h3 class="font-display text-base font-semibold text-parch">
+                类似单卡 · {{ detail.name_zh || detail.name_en }}
+              </h3>
+              <p class="mt-0.5 text-[10px] text-faint">
+                按共同标签数排序 · 相似度 = 共同标签 / {{ similarNumTags || simTags.length }} 个标签 · 共 {{ similarTotal }} 张
+              </p>
+            </div>
+            <button class="px-2 text-lg text-mute hover:text-gold" @click="similarOpen = false">✕</button>
+          </div>
+
+          <div class="min-h-0 flex-1 overflow-y-auto p-4">
+            <p v-if="similarLoading && !similar.length" class="py-8 text-center text-xs text-faint">查询中…</p>
+            <p v-else-if="similarError" class="py-8 text-center text-xs text-faint">{{ similarError }}</p>
+            <p v-else-if="!similar.length" class="py-8 text-center text-xs text-faint">暂无共同标签的卡</p>
+            <div v-else class="grid grid-cols-4 gap-3 sm:grid-cols-5 lg:grid-cols-6">
+              <button
+                v-for="c in similar"
+                :key="c.oracle_id"
+                class="group min-w-0 text-left"
+                :title="c.shared_tags?.length ? `共同标签:${c.shared_tags.join(' · ')}` : ''"
+                @click="similarOpen = false; openDetail(c.oracle_id)"
+              >
+                <div class="aspect-[63/88] w-full overflow-hidden rounded-[3px] bg-panel2">
+                  <img
+                    v-if="c.image_url"
+                    :src="c.image_url"
+                    :alt="c.name_en"
+                    loading="lazy"
+                    class="cardimg h-full w-full object-cover"
+                    @load="e => e.target.classList.add('loaded')"
+                  />
+                  <div v-else class="flex h-full w-full items-center justify-center text-[10px] text-faint">无图</div>
+                </div>
+                <p class="mt-0.5 truncate text-[10px] text-mute transition-colors group-hover:text-gold">{{ c.name_zh || c.name_en }}</p>
+                <!-- 相似度指标:百分比 + 共同标签数 + 迷你进度条 -->
+                <div class="mt-0.5">
+                  <div class="flex items-baseline justify-between font-num text-[9px]">
+                    <span class="font-bold text-gold">{{ Math.round((c.similarity || 0) * 100) }}%</span>
+                    <span class="text-faint">{{ c.shared }}/{{ similarNumTags }} 标签</span>
+                  </div>
+                  <div class="mt-0.5 h-1 overflow-hidden rounded-sm bg-panel2">
+                    <div class="h-full rounded-sm bg-gold" :style="{ width: `${Math.round((c.similarity || 0) * 100)}%` }"></div>
+                  </div>
+                </div>
+              </button>
+            </div>
+          </div>
+
+          <div class="flex items-center justify-between gap-2 border-t border-line px-4 py-2.5">
+            <button
+              class="text-[10px] text-faint underline-offset-2 transition-colors hover:text-gold hover:underline"
+              @click="viewAllSimilar()"
+            >在主列表查看全部 {{ similarTotal }} 张 →</button>
+            <button
+              v-if="similar.length < similarTotal"
+              class="rounded-sm border border-line bg-panel2 px-3 py-1 text-[11px] text-mute transition-colors hover:border-golddim hover:text-gold disabled:opacity-50"
+              :disabled="similarLoading"
+              @click="loadSimilarPage(similarPage + 1)"
+            >{{ similarLoading ? '加载中…' : '加载更多' }}</button>
+          </div>
+        </div>
       </div>
     </Teleport>
   </div>
