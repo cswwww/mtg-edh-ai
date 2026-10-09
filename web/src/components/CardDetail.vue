@@ -71,6 +71,34 @@ function hideTip() {
 function hideVerTip() {
   verTip.value.show = false
 }
+
+// 类似单卡卡图悬浮层(加大版,方便读卡面文字)
+const simTip = ref({ show: false, x: 0, y: 0, name: '', img: '', similarity: 0, shared: 0 })
+function showSimTip(e, c) {
+  simTip.value = {
+    show: true, x: 0, y: 0,
+    name: c.name_zh || c.name_en || '',
+    img: c.image_url || '',
+    similarity: c.similarity || 0,
+    shared: c.shared || 0,
+  }
+  placeSim(e)
+}
+function placeSim(e) {
+  const W = 264, H = 460  // 浮层估算尺寸(卡图 256 宽 + 底部信息条)
+  let x = e.clientX + 18
+  let y = e.clientY + 14
+  if (x + W > window.innerWidth) x = e.clientX - W - 10
+  if (y + H > window.innerHeight) y = window.innerHeight - H - 8
+  simTip.value.x = Math.max(4, x)
+  simTip.value.y = Math.max(4, y)
+}
+function moveSimTip(e) {
+  if (simTip.value.show) placeSim(e)
+}
+function hideSimTip() {
+  simTip.value.show = false
+}
 async function loadEdhrec() {
   edhrecData.value = null
   edhrecError.value = ''
@@ -512,6 +540,24 @@ function searchByTag(t) {
             </div>
           </Teleport>
 
+          <!-- 类似单卡卡图悬浮层(加大版,盖住类似单卡弹窗) -->
+          <Teleport to="body">
+            <div
+              v-if="simTip.show"
+              class="pointer-events-none fixed z-[70] w-64 overflow-hidden rounded-[3px] border border-line bg-panel shadow-2xl"
+              :style="{ left: simTip.x + 'px', top: simTip.y + 'px' }"
+            >
+              <img v-if="simTip.img" :src="simTip.img" class="cardimg loaded block w-full" />
+              <div v-else class="flex h-80 w-full items-center justify-center text-[10px] text-faint">无卡图</div>
+              <div class="border-t border-line bg-panel px-1.5 py-1">
+                <p class="truncate text-[10px] text-mute">{{ simTip.name }}</p>
+                <p class="mt-0.5 font-num text-[9px] text-faint">
+                  相似度 {{ Math.round(simTip.similarity * 100) }}% · 共同标签 {{ simTip.shared }} 个
+                </p>
+              </div>
+            </div>
+          </Teleport>
+
           <!-- 版本(点击跳 Scryfall 该系列的这张卡) -->
           <div class="mt-5">
             <p class="mb-1.5 text-[10px] tracking-[0.2em] text-faint">版本({{ detail.all_sets.length }})</p>
@@ -620,6 +666,9 @@ function searchByTag(t) {
                 class="group min-w-0 text-left"
                 :title="c.shared_tags?.length ? `共同标签:${c.shared_tags.join(' · ')}` : ''"
                 @click="similarOpen = false; openDetail(c.oracle_id)"
+                @mouseenter="showSimTip($event, c)"
+                @mousemove="moveSimTip"
+                @mouseleave="hideSimTip"
               >
                 <div class="aspect-[63/88] w-full overflow-hidden rounded-[3px] bg-panel2">
                   <img
