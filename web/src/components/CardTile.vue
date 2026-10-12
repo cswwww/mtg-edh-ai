@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { state, openDetail } from '../store'
 
+const emit = defineEmits(['contextmenu'])
 const props = defineProps({
   card: Object,
 })
@@ -25,6 +26,7 @@ const sz = computed(() => sizes[state.size] || sizes.M)
     class="group flex flex-col items-start gap-1 text-left"
     :class="sz.w"
     @click="openDetail(card.oracle_id)"
+    @contextmenu="emit('contextmenu', card, $event)"
   >
     <div class="w-full overflow-hidden rounded-[3px] bg-panel2" :class="sz.img">
       <img
