@@ -2,6 +2,10 @@
 import { ref, computed, onMounted } from 'vue'
 import { state, openDetail, LIST_COLS } from '../store'
 import ManaText from './ManaText.vue'
+import CardTip from './CardTip.vue'
+
+// 悬停卡图浮窗(网格瓦片与无图列表行共用)
+const cardTip = ref(null)
 
 const EXAMPLE = `Commander
 1 受诅国王寇沃
@@ -70,6 +74,7 @@ async function parse() {
     totalQty.value = d.total_qty
     filterTags.value = []
     tagExpanded.value = false
+    clearAttrFilters()
     showInput.value = false
     saveDeck()
   } catch (e) {
@@ -104,17 +109,70 @@ const untagged = computed(() =>
 )
 
 // ---------------- 颜色 / 类型 / 总法术力 筛选(本页独立,不影响查卡页) ----------------
+// 选项不再写死,全部由当前牌表动态推导
 const COLOR_ROWS = [
   { c: 'W', label: '白' }, { c: 'U', label: '蓝' }, { c: 'B', label: '黑' },
   { c: 'R', label: '红' }, { c: 'G', label: '绿' },
 ]
-const QUICK_TYPES = [
+const TYPE_DEFS = [
   { t: 'Creature', zh: '生物' }, { t: 'Sorcery', zh: '法术' },
   { t: 'Instant', zh: '瞬间' }, { t: 'Enchantment', zh: '结界' },
   { t: 'Artifact', zh: '神器' }, { t: 'Land', zh: '地' },
-  { t: 'Planeswalker', zh: '鹏洛客' },
+  { t: 'Planeswalker', zh: '鹏洛客' }, { t: 'Battle', zh: '战役' },
+  { t: 'Kindred', zh: '亲缘' }, { t: 'Tribal', zh: '部族' },
 ]
-const CMC_OPTIONS = [...Array.from({ length: 11 }, (_, i) => String(i)), '11+']
+
+// 牌表里实际出现的颜色(按 WUBRG 顺序)
+const deckColors = computed(() => {
+  const present = new Set()
+  for (const c of cards.value || []) for (const col of c.colors || []) present.add(col)
+  return COLOR_ROWS.filter((m) => present.has(m.c))
+})
+// 是否存在无色牌(决定是否显示「无」按钮)
+const hasColorless = computed(() =>
+  (cards.value || []).some((c) => !(c.colors || []).length)
+)
+// 牌表里实际出现的卡牌类型,带数量,降序
+const deckTypes = computed(() => {
+  const list = cards.value || []
+  return TYPE_DEFS
+    .map((d) => ({
+      ...d,
+      n: list.reduce((s, c) => s + ((c.type_line_en || '').includes(d.t) ? c.qty : 0), 0),
+    }))
+    .filter((d) => d.n > 0)
+    .sort((a, b) => b.n - a.n || a.t.localeCompare(b.t))
+})
+// 牌表里实际出现的总法术力档位(含 11+)
+const cmcOptions = computed(() => {
+  const set = new Set()
+  for (const c of cards.value || []) {
+    const v = c.cmc ?? 0
+    set.add(v >= 11 ? '11+' : String(v))
+  }
+  return [...set].sort((a, b) => (a === '11+' ? 99 : Number(a)) - (b === '11+' ? 99 : Number(b)))
+})
+
+// ---------------- 法术力曲线(按牌表动态统计,法术与地堆叠) ----------------
+const isLand = (c) => (c.type_line_en || '').includes('Land')
+const curve = computed(() => {
+  const buckets = Array.from({ length: 12 }, () => ({ spells: 0, lands: 0 }))
+  for (const c of cards.value || []) {
+    const i = Math.min(c.cmc ?? 0, 11)
+    if (isLand(c)) buckets[i].lands += c.qty
+    else buckets[i].spells += c.qty
+  }
+  return buckets
+})
+const curveMax = computed(() => Math.max(1, ...curve.value.map((b) => b.spells + b.lands)))
+const curveSpellsTotal = computed(() => curve.value.reduce((s, b) => s + b.spells, 0))
+const curveLandsTotal = computed(() => curve.value.reduce((s, b) => s + b.lands, 0))
+function curvePct(n) {
+  return `${(n / curveMax.value) * 100}%`
+}
+function curveLabel(i) {
+  return i >= 11 ? '11+' : String(i)
+}
 
 const fColors = ref([])
 const fColorless = ref(false)
@@ -240,6 +298,7 @@ function onImg(e) {
 
 <template>
   <div class="min-h-0 flex-1 overflow-y-auto">
+    <CardTip ref="cardTip" />
     <!-- 输入区 -->
     <div v-if="showInput || !cards" class="mx-auto max-w-2xl px-4 py-10">
       <h2 class="font-display text-xl font-bold text-parch">指挥官牌表 · 标签拆解</h2>
@@ -310,13 +369,41 @@ function onImg(e) {
         </div>
       </div>
 
+      <!-- 曲线 + 筛选:左右两栏 -->
+      <div class="mt-3 flex flex-wrap items-start gap-3">
+
+      <!-- 法术力曲线(固定宽度,不换行挤压) -->
+      <div class="w-[320px] shrink-0 rounded-sm border border-line bg-panel p-3">
+        <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <span class="text-[10px] tracking-widest text-faint">法术力曲线</span>
+          <span class="text-[10px] text-faint">法术 {{ curveSpellsTotal }} · 地 {{ curveLandsTotal }}</span>
+          <span class="flex-1"></span>
+          <span class="flex items-center gap-3 text-[10px] text-faint">
+            <span class="flex items-center gap-1"><i class="inline-block h-2 w-2 rounded-[1px] bg-golddim"></i>法术</span>
+            <span class="flex items-center gap-1"><i class="inline-block h-2 w-2 rounded-[1px] bg-[#5a6b62]"></i>地</span>
+          </span>
+        </div>
+        <div class="mt-2 flex items-end gap-1">
+          <div v-for="(b, i) in curve" :key="i" class="flex min-w-0 flex-1 flex-col items-center gap-0.5"
+            :title="`${curveLabel(i)} 费:法术 ${b.spells} · 地 ${b.lands}`"
+          >
+            <span class="font-num text-[9px] leading-none text-faint">{{ b.spells + b.lands || '' }}</span>
+            <div class="flex h-20 w-full flex-col justify-end">
+              <div class="w-full bg-[#5a6b62]" :style="{ height: curvePct(b.lands) }"></div>
+              <div class="w-full bg-golddim" :style="{ height: curvePct(b.spells) }"></div>
+            </div>
+            <span class="font-num text-[9px] leading-none text-mute">{{ curveLabel(i) }}</span>
+          </div>
+        </div>
+      </div>
+
       <!-- 颜色 / 类型 / 总法术力 筛选 -->
-      <div class="mt-3 rounded-sm border border-line bg-panel p-3">
+      <div class="min-w-0 flex-1 rounded-sm border border-line bg-panel p-3">
         <div class="flex flex-wrap items-center gap-x-5 gap-y-2">
           <div class="flex items-center gap-1.5">
             <span class="text-[10px] tracking-widest text-faint">颜色</span>
             <button
-              v-for="m in COLOR_ROWS"
+              v-for="m in deckColors"
               :key="m.c"
               class="rounded-sm border px-2 py-0.5 text-[11px] transition-colors"
               :class="fColors.includes(m.c)
@@ -325,6 +412,7 @@ function onImg(e) {
               @click="toggleIn(fColors, m.c)"
             >{{ m.label }}</button>
             <button
+              v-if="hasColorless"
               class="rounded-sm border px-2 py-0.5 text-[11px] transition-colors"
               :class="fColorless
                 ? 'border-golddim bg-golddim/40 font-bold text-gold'
@@ -349,10 +437,10 @@ function onImg(e) {
               @click="fCcPartial = !fCcPartial; if (fCcPartial) fCcExclude = false"
             >∩</button>
           </div>
-          <div class="flex items-center gap-1.5">
+          <div v-if="deckTypes.length" class="flex items-center gap-1.5">
             <span class="text-[10px] tracking-widest text-faint">类型</span>
             <button
-              v-for="m in QUICK_TYPES"
+              v-for="m in deckTypes"
               :key="m.t"
               class="rounded-sm border px-2 py-0.5 text-[11px] transition-colors"
               :class="fTypes.includes(m.t)
@@ -360,12 +448,12 @@ function onImg(e) {
                 : 'border-line bg-panel2 text-mute hover:border-golddim hover:text-parch'"
               title="多选为交集(如 神器+生物 = 神器生物)"
               @click="toggleIn(fTypes, m.t)"
-            >{{ m.zh }}</button>
+            >{{ m.zh }} <span class="font-num text-faint">{{ m.n }}</span></button>
           </div>
-          <div class="flex items-center gap-1.5">
+          <div v-if="cmcOptions.length" class="flex items-center gap-1.5">
             <span class="text-[10px] tracking-widest text-faint">总法术力</span>
             <button
-              v-for="v in CMC_OPTIONS"
+              v-for="v in cmcOptions"
               :key="v"
               class="rounded-sm border px-1.5 py-0.5 font-num text-[11px] transition-colors"
               :class="fCmc.includes(v)
@@ -381,6 +469,8 @@ function onImg(e) {
           >清除</button>
         </div>
         <p class="mt-1.5 text-[10px] text-faint">颜色默认精确匹配(⊆=不含未选 · ∩=部分匹配);类型多选为交集;总法术力多选为并集</p>
+      </div>
+
       </div>
 
       <!-- 未识别行 -->
@@ -449,6 +539,9 @@ function onImg(e) {
           class="grid w-full items-center gap-2 border-b border-line px-3 py-1.5 text-left transition-colors hover:bg-panel2"
           :style="{ gridTemplateColumns: listCols }"
           @click="openDetail(c.oracle_id)"
+          @mouseenter="cardTip?.show($event, c, `×${c.qty} · ${c.type_line_zh || c.type_line_en || ''}`)"
+          @mousemove="cardTip?.move"
+          @mouseleave="cardTip?.hide"
         >
           <span class="font-num text-[11px] font-bold text-gold">×{{ c.qty }}</span>
           <span class="min-w-0">
@@ -473,7 +566,14 @@ function onImg(e) {
         class="mt-3 grid gap-3"
         :style="{ gridTemplateColumns: `repeat(${cols}, minmax(0,1fr))` }"
       >
-        <div v-for="c in filtered" :key="c.oracle_id" class="group flex flex-col gap-1">
+        <div
+          v-for="c in filtered"
+          :key="c.oracle_id"
+          class="group flex flex-col gap-1"
+          @mouseenter="cardTip?.show($event, c)"
+          @mousemove="cardTip?.move"
+          @mouseleave="cardTip?.hide"
+        >
           <button class="relative block w-full overflow-hidden rounded-[3px] bg-panel2" @click="openDetail(c.oracle_id)">
             <img
               v-if="c.image_url"
@@ -522,6 +622,9 @@ function onImg(e) {
             :key="c.oracle_id"
             class="hl-title truncate text-xs text-mute hover:text-parch"
             @click="openDetail(c.oracle_id)"
+            @mouseenter="cardTip?.show($event, c, `×${c.qty}`)"
+            @mousemove="cardTip?.move"
+            @mouseleave="cardTip?.hide"
           >{{ c.name_zh || c.name_en }} <span class="font-num text-faint">×{{ c.qty }}</span></button>
         </div>
       </div>
