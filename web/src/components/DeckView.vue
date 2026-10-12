@@ -153,20 +153,99 @@ const cmcOptions = computed(() => {
   return [...set].sort((a, b) => (a === '11+' ? 99 : Number(a)) - (b === '11+' ? 99 : Number(b)))
 })
 
-// ---------------- 法术力曲线(按牌表动态统计,法术与地堆叠) ----------------
+// ---------------- 法术力曲线(按牌表动态统计,只统计法术,不含地) ----------------
 const isLand = (c) => (c.type_line_en || '').includes('Land')
 const curve = computed(() => {
-  const buckets = Array.from({ length: 12 }, () => ({ spells: 0, lands: 0 }))
+  const buckets = Array.from({ length: 12 }, () => 0)
   for (const c of cards.value || []) {
-    const i = Math.min(c.cmc ?? 0, 11)
-    if (isLand(c)) buckets[i].lands += c.qty
-    else buckets[i].spells += c.qty
+    if (isLand(c)) continue
+    buckets[Math.min(c.cmc ?? 0, 11)] += c.qty
   }
   return buckets
 })
-const curveMax = computed(() => Math.max(1, ...curve.value.map((b) => b.spells + b.lands)))
-const curveSpellsTotal = computed(() => curve.value.reduce((s, b) => s + b.spells, 0))
-const curveLandsTotal = computed(() => curve.value.reduce((s, b) => s + b.lands, 0))
+const curveMax = computed(() => Math.max(1, ...curve.value))
+const curveSpellsTotal = computed(() => curve.value.reduce((s, n) => s + n, 0))
+const curveLandsTotal = computed(() =>
+  (cards.value || []).reduce((s, c) => s + (isLand(c) ? c.qty : 0), 0)
+)
+// 指挥官主将(Partner 时可能有多位;牌表未标主将时可手动指定,持久化到 localStorage)
+const CMD_KEY = 'mtg-deck-commander'
+function loadCmd() {
+  try { return JSON.parse(localStorage.getItem(CMD_KEY) || 'null') } catch { return null }
+}
+const manualCmd = ref(loadCmd())
+function setManualCommander(c) {
+  manualCmd.value = c
+  try { localStorage.setItem(CMD_KEY, JSON.stringify(c)) } catch {}
+}
+function clearManualCommander() {
+  manualCmd.value = null
+  try { localStorage.removeItem(CMD_KEY) } catch {}
+}
+const commanders = computed(() => {
+  const list = cards.value || []
+  const m = list.filter((c) => c.is_commander)
+  if (manualCmd.value && !m.some((c) => c.oracle_id === manualCmd.value.oracle_id)) {
+    // 手动指定的卡在牌表里:直接展示牌表数据(无「手动」标记);不在牌表里才追加手动条目
+    const inDeck = list.find((c) => c.oracle_id === manualCmd.value.oracle_id)
+    m.push(inDeck ? inDeck : { ...manualCmd.value, _manual: true })
+  }
+  return m
+})
+// 主将 oracle_id 集合:网格/列表里的徽标以它为准(含手动指定)
+const commanderIds = computed(() => new Set(commanders.value.map((c) => c.oracle_id)))
+
+// 主将选择器:按卡名实时搜索(走 /api/search 全文模式)
+const pickerOpen = ref(false)
+const pickerQ = ref('')
+const pickerItems = ref([])
+const pickerLoading = ref(false)
+let pickerSeq = 0
+let pickerTimer = 0
+async function pickerSearch() {
+  const q = pickerQ.value.trim()
+  pickerItems.value = []
+  if (!q) return
+  const my = ++pickerSeq
+  pickerLoading.value = true
+  try {
+    const r = await fetch('/api/search?q=' + encodeURIComponent(q) + '&mode=fts&page_size=8')
+    if (!r.ok) throw new Error('HTTP ' + r.status)
+    const d = await r.json()
+    if (my === pickerSeq) pickerItems.value = d.items || []
+  } catch {
+    if (my === pickerSeq) pickerItems.value = []
+  } finally {
+    if (my === pickerSeq) pickerLoading.value = false
+  }
+}
+function onPickerInput() {
+  clearTimeout(pickerTimer)
+  pickerTimer = setTimeout(pickerSearch, 250)
+}
+function pickCommander(it) {
+  setManualCommander({
+    oracle_id: it.oracle_id,
+    name_zh: it.name_zh,
+    name_en: it.name_en,
+    image_url: it.image_url,
+    cmc: it.cmc,
+    mana_cost: it.mana_cost,
+    type_line_zh: it.type_line_zh,
+    type_line_en: it.type_line_en,
+    rarity: it.rarity,
+    edhrec_rank: it.edhrec_rank,
+    qty: 1,
+  })
+  pickerOpen.value = false
+  pickerQ.value = ''
+  pickerItems.value = []
+}
+function closePicker() {
+  pickerOpen.value = false
+  pickerQ.value = ''
+  pickerItems.value = []
+}
 function curvePct(n) {
   return `${(n / curveMax.value) * 100}%`
 }
@@ -369,28 +448,118 @@ function onImg(e) {
         </div>
       </div>
 
-      <!-- 曲线 + 筛选:左右两栏 -->
-      <div class="mt-3 flex flex-wrap items-start gap-3">
+      <!-- 指挥官主将(始终显示;未识别时可在面板内手动搜索指定) -->
+      <div class="mt-3 flex items-stretch gap-3 rounded-sm border border-golddim/60 bg-panel p-3">
+        <div class="flex shrink-0 flex-col justify-center border-r border-line pr-3">
+          <span class="text-[10px] tracking-[0.2em] text-faint">主将</span>
+        </div>
 
-      <!-- 法术力曲线(固定宽度,不换行挤压) -->
-      <div class="w-[320px] shrink-0 rounded-sm border border-line bg-panel p-3">
+        <!-- 已有主将:展示 + 可再添加(搭档) -->
+        <div v-if="commanders.length && !pickerOpen" class="flex min-w-0 flex-1 flex-wrap items-center gap-x-6 gap-y-2">
+          <div
+            v-for="c in commanders"
+            :key="c.oracle_id"
+            class="group flex min-w-0 items-stretch gap-2.5"
+          >
+            <button class="flex min-w-0 items-stretch gap-2.5 text-left" @click="openDetail(c.oracle_id)">
+              <div class="w-[68px] shrink-0 overflow-hidden rounded-[3px] bg-panel2">
+                <img
+                  v-if="c.image_url"
+                  :src="c.image_url"
+                  :alt="c.name_en"
+                  loading="lazy"
+                  class="block aspect-[63/88] w-full object-cover transition-transform group-hover:scale-105"
+                  @load="onImg"
+                />
+                <div v-else class="flex aspect-[63/88] w-full items-center justify-center text-[9px] text-faint">无图</div>
+              </div>
+              <div class="min-w-0 py-0.5">
+                <p class="hl-title truncate text-sm font-bold text-gold group-hover:text-parch">{{ c.name_zh || c.name_en }}</p>
+                <p v-if="c.name_zh" class="truncate font-num text-[10px] text-faint">{{ c.name_en }}</p>
+                <p class="mt-1 flex items-center gap-1.5 font-num text-[11px] text-mute">
+                  <span>{{ c.cmc }}</span>
+                  <ManaText v-if="c.mana_cost" :text="c.mana_cost" />
+                </p>
+                <p class="mt-0.5 truncate text-[10px] text-mute">{{ c.type_line_zh || c.type_line_en }}</p>
+                <p class="mt-1 truncate text-[10px] text-faint">
+                  <span :class="rarityOf(c).c">{{ rarityOf(c).t }}</span>
+                  <span v-if="c.edhrec_rank"> · EDHREC #{{ c.edhrec_rank }}</span>
+                  <span v-if="c._manual" class="text-yellow-600/70" title="手动指定的主将"> · 手动</span>
+                </p>
+              </div>
+            </button>
+            <button
+              v-if="c._manual"
+              class="self-start px-0.5 text-[10px] text-faint transition-colors hover:text-red-400"
+              title="移除手动指定的主将"
+              @click="clearManualCommander"
+            >×</button>
+          </div>
+          <button
+            class="rounded-sm border border-dashed px-2.5 py-1.5 text-[11px] transition-colors"
+            :class="commanders.length ? 'border-line text-mute hover:border-golddim hover:text-parch' : 'border-golddim text-gold'"
+            @click="pickerOpen = true"
+          >＋ 添加</button>
+        </div>
+
+        <!-- 主将选择器:无主将时默认展开,或点「添加」打开 -->
+        <div v-else class="min-w-0 flex-1">
+          <div class="flex items-center gap-2">
+            <input
+              v-model="pickerQ"
+              type="text"
+              spellcheck="false"
+              class="w-full max-w-sm rounded-sm border border-line bg-panel2 px-2 py-1 text-xs text-parch outline-none placeholder:text-faint focus:border-golddim"
+              placeholder="搜索卡名指定主将(中英文均可),回车立即搜索"
+              @input="onPickerInput"
+              @keydown.enter="pickerSearch"
+            />
+            <span v-if="pickerLoading" class="text-[10px] text-faint">搜索中…</span>
+            <button
+              v-if="commanders.length"
+              class="shrink-0 text-[10px] text-faint transition-colors hover:text-gold"
+              @click="closePicker"
+            >收起</button>
+          </div>
+          <div v-if="pickerItems.length" class="mt-2 flex flex-wrap gap-1.5">
+            <button
+              v-for="it in pickerItems"
+              :key="it.oracle_id"
+              class="flex items-center gap-1.5 rounded-sm border border-line bg-panel2 px-1.5 py-1 text-[11px] text-mute transition-colors hover:border-golddim hover:text-parch"
+              @click="pickCommander(it)"
+            >
+              <img
+                v-if="it.image_url"
+                :src="it.image_url"
+                :alt="it.name_en"
+                loading="lazy"
+                class="h-8 w-[23px] rounded-[2px] object-cover"
+              />
+              <span class="truncate">{{ it.name_zh || it.name_en }}</span>
+              <span class="font-num text-[9px] text-faint">{{ it.cmc }}</span>
+            </button>
+          </div>
+          <p v-else-if="pickerQ.trim() && !pickerLoading" class="mt-2 text-[10px] text-faint">没有匹配的卡,换个关键词试试</p>
+          <p v-else class="mt-2 text-[10px] text-faint">牌表里没有识别到主将,搜索一张卡把它设为这套牌的主将</p>
+        </div>
+      </div>
+
+      <!-- 曲线 + 筛选:左右两栏(筛选在左,曲线在右,高度对齐) -->
+      <div class="mt-3 flex flex-wrap gap-3">
+
+      <!-- 法术力曲线(右栏,固定宽度,与筛选栏等高) -->
+      <div class="order-2 flex w-[320px] shrink-0 flex-col rounded-sm border border-line bg-panel p-3">
         <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
           <span class="text-[10px] tracking-widest text-faint">法术力曲线</span>
-          <span class="text-[10px] text-faint">法术 {{ curveSpellsTotal }} · 地 {{ curveLandsTotal }}</span>
-          <span class="flex-1"></span>
-          <span class="flex items-center gap-3 text-[10px] text-faint">
-            <span class="flex items-center gap-1"><i class="inline-block h-2 w-2 rounded-[1px] bg-golddim"></i>法术</span>
-            <span class="flex items-center gap-1"><i class="inline-block h-2 w-2 rounded-[1px] bg-[#5a6b62]"></i>地</span>
-          </span>
+          <span class="text-[10px] text-faint">法术 {{ curveSpellsTotal }} 张 · 不含地(地 {{ curveLandsTotal }} 张)</span>
         </div>
-        <div class="mt-2 flex items-end gap-1">
-          <div v-for="(b, i) in curve" :key="i" class="flex min-w-0 flex-1 flex-col items-center gap-0.5"
-            :title="`${curveLabel(i)} 费:法术 ${b.spells} · 地 ${b.lands}`"
+        <div class="mt-2 flex flex-1 items-end gap-1">
+          <div v-for="(n, i) in curve" :key="i" class="flex min-w-0 flex-1 flex-col items-center gap-0.5"
+            :title="`${curveLabel(i)} 费:${n} 张`"
           >
-            <span class="font-num text-[9px] leading-none text-faint">{{ b.spells + b.lands || '' }}</span>
+            <span class="font-num text-[9px] leading-none text-faint">{{ n || '' }}</span>
             <div class="flex h-20 w-full flex-col justify-end">
-              <div class="w-full bg-[#5a6b62]" :style="{ height: curvePct(b.lands) }"></div>
-              <div class="w-full bg-golddim" :style="{ height: curvePct(b.spells) }"></div>
+              <div class="w-full bg-golddim" :style="{ height: curvePct(n) }"></div>
             </div>
             <span class="font-num text-[9px] leading-none text-mute">{{ curveLabel(i) }}</span>
           </div>
@@ -398,7 +567,7 @@ function onImg(e) {
       </div>
 
       <!-- 颜色 / 类型 / 总法术力 筛选 -->
-      <div class="min-w-0 flex-1 rounded-sm border border-line bg-panel p-3">
+      <div class="order-1 min-w-0 flex-1 rounded-sm border border-line bg-panel p-3">
         <div class="flex flex-wrap items-center gap-x-5 gap-y-2">
           <div class="flex items-center gap-1.5">
             <span class="text-[10px] tracking-widest text-faint">颜色</span>
@@ -546,7 +715,7 @@ function onImg(e) {
           <span class="font-num text-[11px] font-bold text-gold">×{{ c.qty }}</span>
           <span class="min-w-0">
             <span class="block truncate text-xs font-medium text-parch">
-              <span v-if="c.is_commander" class="mr-1 rounded-sm bg-gold px-1 text-[9px] font-bold text-ink">主将</span>{{ c.name_zh || c.name_en }}
+              <span v-if="commanderIds.has(c.oracle_id)" class="mr-1 rounded-sm bg-gold px-1 text-[9px] font-bold text-ink">主将</span>{{ c.name_zh || c.name_en }}
               <span v-if="c.fuzzy" class="text-[9px] text-yellow-500" title="模糊匹配,卡名可能与原牌表略有出入">?</span>
             </span>
             <span v-if="c.name_zh" class="block truncate text-[10px] text-faint">{{ c.name_en }}</span>
@@ -584,7 +753,7 @@ function onImg(e) {
               @load="onImg"
             />
             <div v-else class="flex aspect-[63/88] w-full items-center justify-center text-[10px] text-faint">无图</div>
-            <span v-if="c.is_commander" class="absolute left-1 top-1 rounded-sm bg-gold px-1.5 py-0.5 text-[10px] font-bold text-ink">主将</span>
+            <span v-if="commanderIds.has(c.oracle_id)" class="absolute left-1 top-1 rounded-sm bg-gold px-1.5 py-0.5 text-[10px] font-bold text-ink">主将</span>
             <span class="absolute bottom-1 right-1 rounded-sm bg-ink/80 px-1.5 py-0.5 font-num text-[10px] font-bold text-parch">×{{ c.qty }}</span>
           </button>
           <div class="leading-tight">
