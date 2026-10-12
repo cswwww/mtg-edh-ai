@@ -66,7 +66,7 @@ function toggleMode() {
       </div>
       <div v-if="route === 'home'" class="min-w-0 flex-1"><SearchBar /></div>
       <div v-else class="min-w-0 flex-1 text-[11px] text-faint">
-        粘贴指挥官牌表,按 Tagger 标签拆解分析(点左上「早晚能找到卡」回主页)
+        管理多套牌表并查看标签拆解分析(点左上「早晚能找到卡」回主页)
       </div>
     </header>
 

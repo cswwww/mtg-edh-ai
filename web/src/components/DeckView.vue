@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed } from 'vue'
 import { state, openDetail, LIST_COLS, MANA } from '../store'
 import ManaText from './ManaText.vue'
 import CardTip from './CardTip.vue'
@@ -29,21 +29,146 @@ const unmatched = ref([])
 const totalQty = ref(0)
 const loading = ref(false)
 const error = ref('')
+const storageError = ref('')
 const filterTags = ref([])
 const tagMode = ref('and')
-const showInput = ref(true)
+const view = ref('list')
+const deckName = ref('')
+const editingDeckId = ref(null)
+const selectedDeckId = ref(null)
 const copiedUnmatched = ref(false)
 
-// 牌表持久化:解析成功时保存原文,进入页面自动恢复并重解析
-const DECK_KEY = 'mtg-deck-text'
-function saveDeck() {
-  try {
-    if (text.value.trim()) localStorage.setItem(DECK_KEY, text.value)
-  } catch {}
+// 牌表保存在当前浏览器,旧版单牌表存档会在首次读取时迁移。
+const DECKS_KEY = 'mtg-decks'
+const LEGACY_DECK_KEY = 'mtg-deck-text'
+function makeDeckId() {
+  return globalThis.crypto?.randomUUID?.() || `deck-${Date.now()}-${Math.random().toString(36).slice(2)}`
 }
-{
-  const saved = localStorage.getItem(DECK_KEY)
-  if (saved && saved.trim()) text.value = saved
+function readDecks() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(DECKS_KEY) || '[]')
+    if (!Array.isArray(saved)) throw new Error('牌表存档格式无效')
+    return saved
+      .filter((deck) => deck && typeof deck.id === 'string' && typeof deck.text === 'string')
+      .map((deck) => ({
+        ...deck,
+        name: typeof deck.name === 'string' && deck.name.trim() ? deck.name : '未命名牌表',
+      }))
+  } catch (e) {
+    storageError.value = `读取牌表存档失败: ${String(e)}`
+    return []
+  }
+}
+const decks = ref(readDecks())
+if (!decks.value.length) {
+  try {
+    const legacyText = localStorage.getItem(LEGACY_DECK_KEY)
+    if (legacyText?.trim()) {
+      decks.value = [{
+        id: makeDeckId(),
+        name: '旧牌表',
+        text: legacyText,
+        cardCount: 0,
+        totalQty: 0,
+        commander: '',
+        updatedAt: Date.now(),
+      }]
+      localStorage.setItem(DECKS_KEY, JSON.stringify(decks.value))
+    }
+  } catch (e) {
+    storageError.value = `迁移旧牌表失败: ${String(e)}`
+  }
+}
+function persistDecks() {
+  try {
+    localStorage.setItem(DECKS_KEY, JSON.stringify(decks.value))
+    storageError.value = ''
+  } catch (e) {
+    storageError.value = `保存牌表失败: ${String(e)}`
+  }
+}
+const deckList = computed(() =>
+  [...decks.value].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)))
+function clearCurrentDeck() {
+  cards.value = null
+  unmatched.value = []
+  totalQty.value = 0
+  filterTags.value = []
+  clearAttrFilters()
+}
+function createDeck() {
+  editingDeckId.value = null
+  selectedDeckId.value = null
+  manualCmd.value = null
+  deckName.value = ''
+  text.value = ''
+  error.value = ''
+  clearCurrentDeck()
+  view.value = 'editor'
+}
+function editDeck(deck) {
+  editingDeckId.value = deck.id
+  selectedDeckId.value = deck.id
+  deckName.value = deck.name
+  text.value = deck.text
+  error.value = ''
+  view.value = 'editor'
+}
+async function selectDeck(deck) {
+  editingDeckId.value = deck.id
+  selectedDeckId.value = deck.id
+  deckName.value = deck.name
+  text.value = deck.text
+  error.value = ''
+  clearCurrentDeck()
+  manualCmd.value = loadCmd(deck.id)
+  view.value = 'loading'
+  await parse()
+  if (!cards.value) view.value = 'editor'
+}
+function backToDecks() {
+  view.value = 'list'
+  editingDeckId.value = null
+  selectedDeckId.value = null
+}
+function cancelEdit() {
+  if (editingDeckId.value) {
+    const deck = decks.value.find((item) => item.id === editingDeckId.value)
+    if (deck) {
+      selectedDeckId.value = deck.id
+      deckName.value = deck.name
+      text.value = deck.text
+      view.value = 'detail'
+      return
+    }
+  }
+  backToDecks()
+}
+function deleteDeck(deck) {
+  if (!window.confirm(`确定删除「${deck.name}」吗？`)) return
+  decks.value = decks.value.filter((item) => item.id !== deck.id)
+  persistDecks()
+}
+function saveDeck(parsed) {
+  const commander = parsed.cards.find((card) => card.is_commander)
+  const name = deckName.value.trim() || commander?.name_zh || commander?.name_en || '未命名牌表'
+  const id = editingDeckId.value || makeDeckId()
+  const record = {
+    id,
+    name,
+    text: text.value,
+    cardCount: parsed.cards.length,
+    totalQty: parsed.total_qty,
+    commander: commander?.name_zh || commander?.name_en || '',
+    updatedAt: Date.now(),
+  }
+  const index = decks.value.findIndex((deck) => deck.id === id)
+  if (index < 0) decks.value.unshift(record)
+  else decks.value.splice(index, 1, record)
+  editingDeckId.value = id
+  selectedDeckId.value = id
+  deckName.value = name
+  persistDecks()
 }
 
 const zhDict = computed(() => state.meta?.tagdict || {})
@@ -75,8 +200,8 @@ async function parse() {
     filterTags.value = []
     tagExpanded.value = false
     clearAttrFilters()
-    showInput.value = false
-    saveDeck()
+    saveDeck(d)
+    view.value = 'detail'
   } catch (e) {
     error.value = String(e)
   } finally {
@@ -244,18 +369,40 @@ function openColorTips() {
 }
 
 // 指挥官主将(Partner 时可能有多位;牌表未标主将时可手动指定,持久化到 localStorage)
-const CMD_KEY = 'mtg-deck-commander'
-function loadCmd() {
-  try { return JSON.parse(localStorage.getItem(CMD_KEY) || 'null') } catch { return null }
+const CMD_KEY = 'mtg-deck-commander:'
+function loadCmd(deckId) {
+  try {
+    const saved = localStorage.getItem(CMD_KEY + deckId)
+    if (saved) return JSON.parse(saved)
+    if (decks.value.length === 1) {
+      const legacy = localStorage.getItem('mtg-deck-commander')
+      if (legacy) {
+        localStorage.setItem(CMD_KEY + deckId, legacy)
+        return JSON.parse(legacy)
+      }
+    }
+  } catch (e) {
+    storageError.value = `读取主将存档失败: ${String(e)}`
+  }
+  return null
 }
-const manualCmd = ref(loadCmd())
+const manualCmd = ref(null)
 function setManualCommander(c) {
   manualCmd.value = c
-  try { localStorage.setItem(CMD_KEY, JSON.stringify(c)) } catch {}
+  try {
+    if (!selectedDeckId.value) throw new Error('请先选择一套牌')
+    localStorage.setItem(CMD_KEY + selectedDeckId.value, JSON.stringify(c))
+  } catch (e) {
+    storageError.value = `保存主将失败: ${String(e)}`
+  }
 }
 function clearManualCommander() {
   manualCmd.value = null
-  try { localStorage.removeItem(CMD_KEY) } catch {}
+  try {
+    if (selectedDeckId.value) localStorage.removeItem(CMD_KEY + selectedDeckId.value)
+  } catch (e) {
+    storageError.value = `移除主将存档失败: ${String(e)}`
+  }
 }
 const commanders = computed(() => {
   const list = cards.value || []
@@ -387,11 +534,6 @@ const anyFilter = computed(() => attrFilterActive.value || filterTags.value.leng
 
 const filteredQty = computed(() => filtered.value.reduce((s, c) => s + c.qty, 0))
 
-// 进入页面:有存档牌表则自动恢复并重解析
-onMounted(() => {
-  if (text.value.trim()) parse()
-})
-
 // 视图尺寸:与查卡页共用 state.size(S/M/L/LIST,持久化到 localStorage)
 const SIZES = [
   { v: 'S', t: '小' },
@@ -450,13 +592,72 @@ function onImg(e) {
 <template>
   <div class="min-h-0 flex-1 overflow-y-auto">
     <CardTip ref="cardTip" />
+    <!-- 牌表列表 -->
+    <div v-if="view === 'list'" class="mx-auto max-w-5xl px-4 py-8">
+      <div class="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h2 class="font-display text-2xl font-bold text-parch">我的套牌</h2>
+          <p class="mt-1 text-xs text-mute">牌表仅保存在当前浏览器中，可随时回来查看与分析。</p>
+        </div>
+        <button
+          class="rounded-sm border border-golddim bg-golddim/40 px-3 py-1.5 text-xs font-bold text-gold transition-colors hover:bg-golddim/60"
+          @click="createDeck"
+        >＋ 新建牌表</button>
+      </div>
+      <p v-if="storageError" class="mt-4 rounded-sm border border-red-900 bg-red-950/30 px-3 py-2 text-xs text-red-300">{{ storageError }}</p>
+      <div v-if="deckList.length" class="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <article
+          v-for="deck in deckList"
+          :key="deck.id"
+          class="group flex min-h-36 flex-col rounded-sm border border-line bg-panel p-4 transition-colors hover:border-golddim"
+        >
+          <button class="min-w-0 flex-1 text-left" @click="selectDeck(deck)">
+            <h3 class="truncate font-display text-lg font-bold text-parch group-hover:text-gold">{{ deck.name }}</h3>
+            <p v-if="deck.commander" class="mt-1 truncate text-xs text-mute">主将 · {{ deck.commander }}</p>
+            <p class="mt-3 font-num text-[11px] text-faint">{{ deck.cardCount || 0 }} 种卡 · {{ deck.totalQty || 0 }} 张</p>
+            <p class="mt-1 text-[10px] text-faint">{{ new Date(deck.updatedAt || 0).toLocaleDateString() }} 更新</p>
+          </button>
+          <div class="mt-3 flex justify-end border-t border-line pt-2">
+            <button
+              class="px-2 py-1 text-[10px] text-faint transition-colors hover:text-red-400"
+              :aria-label="`删除${deck.name}`"
+              @click="deleteDeck(deck)"
+            >删除</button>
+          </div>
+        </article>
+      </div>
+      <div v-else class="mt-6 rounded-sm border border-dashed border-line bg-panel/50 px-4 py-12 text-center">
+        <p class="font-display text-lg text-parch">这里还没有牌表</p>
+        <p class="mt-1 text-xs text-faint">粘贴一份牌表开始分析，成功后会保存在这里。</p>
+      </div>
+    </div>
+
     <!-- 输入区 -->
-    <div v-if="showInput || !cards" class="mx-auto max-w-2xl px-4 py-10">
-      <h2 class="font-display text-xl font-bold text-parch">指挥官牌表 · 标签拆解</h2>
+    <div v-else-if="view === 'loading'" class="mx-auto max-w-2xl px-4 py-16 text-center">
+      <p class="font-display text-xl font-bold text-parch">正在加载 {{ deckName }}</p>
+      <p class="mt-2 text-xs text-faint">解析并恢复牌表分析数据…</p>
+    </div>
+    <div v-else-if="view === 'editor'" class="mx-auto max-w-2xl px-4 py-10">
+      <div class="flex items-center justify-between gap-3">
+        <h2 class="font-display text-xl font-bold text-parch">{{ editingDeckId ? '编辑牌表' : '新建牌表' }}</h2>
+        <button
+          class="rounded-sm border border-line bg-panel2 px-2.5 py-1 text-[11px] text-mute transition-colors hover:border-golddim hover:text-parch"
+          @click="cancelEdit"
+        >取消</button>
+      </div>
       <p class="mt-1 text-xs text-mute">
         把整份牌表粘到下面(支持 moxfield / 导出的 TXT 格式,中英文卡名均可),
         我会把每张卡按 Tagger 社区标签归类,方便你看这套牌的节奏、去除、过牌等功能分布。
       </p>
+      <label class="mt-4 block text-[10px] tracking-widest text-faint" for="deck-name">牌表名称 <span class="tracking-normal">(留空时使用识别到的主将名称)</span></label>
+      <input
+        id="deck-name"
+        v-model="deckName"
+        type="text"
+        maxlength="80"
+        class="mt-1 w-full rounded-sm border border-line bg-panel2 px-3 py-2 text-sm text-parch outline-none placeholder:text-faint focus:border-golddim"
+        placeholder="例如：寇沃吸血鬼"
+      />
       <textarea
         v-model="text"
         rows="14"
@@ -474,11 +675,12 @@ function onImg(e) {
             : 'border-golddim bg-golddim/40 text-gold hover:bg-golddim/60'"
           :disabled="loading || !text.trim()"
           @click="parse"
-        >{{ loading ? '解析中…' : '解析牌表' }}</button>
+        >{{ loading ? '解析中…' : '保存并分析' }}</button>
         <button class="text-[11px] text-faint transition-colors hover:text-gold" @click="text = EXAMPLE">填入示例</button>
         <span class="text-[11px] text-faint">⌘/Ctrl + Enter 直接解析</span>
       </div>
       <p v-if="error" class="mt-3 text-xs text-red-400">解析失败:{{ error }}</p>
+      <p v-if="storageError" class="mt-3 text-xs text-red-400">{{ storageError }}</p>
     </div>
 
     <!-- 结果区 -->
@@ -486,8 +688,13 @@ function onImg(e) {
       <div class="flex flex-wrap items-center gap-2">
         <button
           class="rounded-sm border px-2.5 py-1 text-[11px] text-mute transition-colors hover:border-golddim hover:text-parch"
-          @click="showInput = true"
-        >✎ 重新粘贴</button>
+          @click="backToDecks"
+        >← 我的套牌</button>
+        <h2 class="max-w-full truncate font-display text-base font-bold text-parch">{{ deckName }}</h2>
+        <button
+          class="rounded-sm border border-line bg-panel2 px-2 py-1 text-[10px] text-mute transition-colors hover:border-golddim hover:text-parch"
+          @click="editDeck(decks.find((deck) => deck.id === selectedDeckId))"
+        >✎ 编辑牌表</button>
         <span class="font-num text-[11px] text-mute">
           {{ cards.length }} 种卡 · {{ totalQty }} 张 · {{ tagCounts.length }} 个标签
         </span>
@@ -519,6 +726,7 @@ function onImg(e) {
           >{{ s.t }}</button>
         </div>
       </div>
+      <p v-if="storageError" class="mt-2 text-[10px] text-red-400">{{ storageError }}</p>
 
       <!-- 指挥官与紧凑法术力图表 -->
       <div class="mt-3 grid gap-3 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">

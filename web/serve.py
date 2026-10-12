@@ -798,13 +798,30 @@ _DECK_ALIAS = {"森林": "树林"}
 
 def parse_deck_lines(text):
     """把牌表文本解析为 [{qty, name, section}];支持 1x Name / Name (SET) 123 /
-    分区标题(Commander/指挥官/Deck 等,有无 # 均可)与 #、// 注释行。 """
+    分区标题(Commander/指挥官/Deck 等,有无 # 均可)与 #、// 注释行。
+    若最后一组牌前有空行,则将该组视为未标注的指挥官区。"""
     out = []
     section = "deck"
-    for raw in (text or "").splitlines():
+    lines = (text or "").splitlines()
+    last_content = next(
+        (i for i in range(len(lines) - 1, -1, -1)
+         if lines[i].strip() and not lines[i].strip().startswith("//")),
+        None,
+    )
+    commander_start = None
+    if last_content is not None:
+        i = last_content - 1
+        while i >= 0 and not lines[i].strip():
+            i -= 1
+        if i < last_content - 1:
+            commander_start = i + 1
+
+    for index, raw in enumerate(lines):
         line = raw.strip()
         if not line or line.startswith("//"):
             continue
+        if commander_start is not None and index >= commander_start:
+            section = "commander"
         if line.startswith("#") and not _DECK_LINE.match(line):
             section = re.sub(r"^#+\s*", "", line).strip().lower()
             continue
