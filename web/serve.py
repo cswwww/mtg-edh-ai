@@ -724,16 +724,30 @@ def card_detail(oracle_id: str):
 _deck_name_map = None
 _deck_face_map = None
 
+# 不是真正的游戏牌,不进入牌表匹配:贴图卡、衍生物、徽记、
+# 诡局计划牌/位面牌/先锋卡、Unstable host/augment、非卡牌 front_card
+_DECK_SKIP_LAYOUTS = {
+    "art_series", "token", "double_faced_token", "emblem",
+    "scheme", "planar", "vanguard", "host", "augment", "front_card",
+}
+
+
+def _deck_real_card(c):
+    return (c.get("layout") or "") not in _DECK_SKIP_LAYOUTS
+
 
 def deck_name_map():
     """{norm_name: card_dict},懒加载自 cards.jsonl,供牌表按卡名精确匹配。
-    同时收集中文名与英文名(去重时同名不同版本保留先遇到的即可,同 oracle 卡)。 """
+    同时收集中文名与英文名(去重时同名不同版本保留先遇到的即可,同 oracle 卡)。
+    贴图卡/衍生物等非游戏牌 layout 直接跳过,避免同名劫持真实卡牌。"""
     global _deck_name_map
     if _deck_name_map is None:
         m = {}
         with open(os.path.join(ROOT, "data", "cards.jsonl"), encoding="utf-8") as f:
             for line in f:
                 c = json.loads(line)
+                if not _deck_real_card(c):
+                    continue
                 for key in (_norm_name(c.get("name_en")), _norm_name(c.get("name_zh"))):
                     if key and key not in m:
                         m[key] = c
@@ -744,13 +758,16 @@ def deck_name_map():
 def deck_face_map():
     """{norm_face_name: card_dict},双面/ split 牌各面名称索引,供整牌名("A // B")
     没写全时按面名兜底命中整卡。面名来源:faces 字段;无 faces 的 prepare 等
-    layout 直接从整牌名按 " // " 拆分。faces/拆分顺序即正背面,冲突保留先遇到的。"""
+    layout 直接从整牌名按 " // " 拆分。faces/拆分顺序即正背面,冲突保留先遇到的。
+    同样跳过贴图卡等(layout 过滤在 deck_name_map 一处定义)。"""
     global _deck_face_map
     if _deck_face_map is None:
         m = {}
         with open(os.path.join(ROOT, "data", "cards.jsonl"), encoding="utf-8") as f:
             for line in f:
                 c = json.loads(line)
+                if not _deck_real_card(c):
+                    continue
                 faces = c.get("faces") or []
                 raw_names = []
                 for face in faces:
