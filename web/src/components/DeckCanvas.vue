@@ -397,12 +397,7 @@ function selectInRect(rect) {
 function onStagePointerDown(event) {
   if (event.button !== 0) return
   const point = stagePoint(event)
-  if (tool.value === 'marquee') {
-    selectionRect.value = { x1: point.x, y1: point.y, x2: point.x, y2: point.y }
-    selectInRect(rectFromPoints(point, point))
-    pointerAction.value = { type: 'marquee', start: point }
-    event.currentTarget.setPointerCapture(event.pointerId)
-  } else if (tool.value === 'pen') {
+  if (tool.value === 'pen') {
     draftStroke.value = { id: makeId(), points: [point] }
     event.currentTarget.setPointerCapture(event.pointerId)
   } else if (tool.value === 'text') {
@@ -413,7 +408,13 @@ function onStagePointerDown(event) {
     persist()
     nextTick(() => stage.value?.querySelector(`[data-text-id="${item.id}"]`)?.focus())
   } else {
+    const hadSelection = selectedIds.value.length > 0
     selectedIds.value = []
+    if (!hadSelection) {
+      selectionRect.value = { x1: point.x, y1: point.y, x2: point.x, y2: point.y }
+      pointerAction.value = { type: 'marquee', start: point }
+      event.currentTarget.setPointerCapture(event.pointerId)
+    }
   }
 }
 
@@ -478,7 +479,7 @@ function onStrokePointerDown(event, stroke) {
 }
 
 function onElementClick(item) {
-  if (tool.value !== 'marquee') selectedIds.value = [item.id]
+  selectedIds.value = [item.id]
 }
 
 function updateText(item, event) {
@@ -610,11 +611,6 @@ function setZoom(value) {
           @click="tool = 'select'"
         >选择</button>
         <button
-          class="rounded-sm border px-2.5 py-1 text-[11px] transition-colors"
-          :class="tool === 'marquee' ? 'border-golddim bg-golddim/40 text-gold' : 'border-line bg-panel2 text-mute hover:text-parch'"
-          @click="tool = 'marquee'"
-        >框选</button>
-        <button
           class="rounded-sm border border-line bg-panel2 px-2.5 py-1 text-[11px] text-mute transition-colors hover:border-golddim hover:text-parch disabled:cursor-not-allowed disabled:opacity-40"
           :disabled="!canGroupSelection"
           @click="groupSelection"
@@ -663,7 +659,7 @@ function setZoom(value) {
           <div
             ref="stage"
             class="absolute left-0 top-0 overflow-hidden border border-[#51483b] bg-[#211e19]"
-            :class="tool === 'pen' || tool === 'marquee' ? 'cursor-crosshair' : tool === 'text' ? 'cursor-text' : 'cursor-default'"
+            :class="tool === 'pen' || selectionRect ? 'cursor-crosshair' : tool === 'text' ? 'cursor-text' : 'cursor-default'"
             :style="{
               width: `${STAGE_WIDTH}px`,
               height: `${STAGE_HEIGHT}px`,

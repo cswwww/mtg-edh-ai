@@ -1205,7 +1205,7 @@ function onImg(e) {
         <p v-if="!filtered.length" class="py-16 text-center text-sm text-faint">没有符合筛选条件的卡牌</p>
       </template>
 
-      <!-- 卡牌网格(小/中/大):图片 + 数量徽标 + 可点标签 -->
+      <!-- 卡牌网格(小/中/大):图片 + 数量徽标 -->
       <div
         v-else
         class="mt-3 grid gap-3"
@@ -1237,22 +1237,6 @@ function onImg(e) {
               {{ c.name_zh || c.name_en }}
               <span v-if="c.fuzzy" class="text-[9px] text-yellow-500" title="模糊匹配,卡名可能与原牌表略有出入">?</span>
             </p>
-            <p class="mt-0.5 flex items-center gap-1.5 text-[10px] text-mute">
-              <span v-if="c.cmc !== null" class="font-num">{{ c.cmc }}</span>
-              <ManaText v-if="c.mana_cost" :text="c.mana_cost" />
-            </p>
-            <div class="mt-1 flex flex-wrap gap-1">
-              <button
-                v-for="t in cardTags(c)"
-                :key="t"
-                class="rounded-sm border px-1.5 py-px text-[9px] transition-colors"
-                :class="filterTags.includes(t)
-                  ? 'border-golddim bg-golddim/40 text-gold'
-                  : 'border-line bg-panel2 text-faint hover:border-golddim hover:text-parch'"
-                :title="t"
-                @click="toggleTag(t)"
-              >{{ tagLabel(t) }}</button>
-            </div>
           </div>
         </div>
         <p v-if="!filtered.length" class="col-span-full py-16 text-center text-sm text-faint">没有符合筛选条件的卡牌</p>

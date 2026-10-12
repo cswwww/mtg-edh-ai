@@ -11,6 +11,7 @@ export function go(r) {
 
 const SAVED_SIZE = localStorage.getItem('mtg-view-size')
 const VALID_SIZES = ['S', 'M', 'L', 'LIST']
+const INITIAL_TAG = new URLSearchParams(window.location.search).get('tag')
 
 export const MANA = {
   W: { label: '白', color: '#ece5ce', ink: '#191715' },
@@ -38,9 +39,9 @@ export const state = reactive({
   types: [],     // 卡牌类型多选,交集(如 生物+神器 = 神器生物)
   rarities: [],   // 稀有度多选(并集)
   commander: true,
-  tags: [],       // 标签筛选(复选,交集/并集由 tagMode 决定)
-  tagMode: 'and', // and=交集 | or=并集
-  sort: 'rel',
+  tags: INITIAL_TAG ? [INITIAL_TAG] : [], // 标签筛选(复选,交集/并集由 tagMode 决定)
+  tagMode: INITIAL_TAG ? 'or' : 'and', // and=交集 | or=并集
+  sort: INITIAL_TAG ? 'edhrec' : 'rel',
   page: 1,
   pageSize: SAVED_SIZE === 'LIST' ? 120 : 60,
   size: VALID_SIZES.includes(SAVED_SIZE) ? SAVED_SIZE : 'M',  // S | M | L | LIST,持久化到 localStorage

@@ -1,6 +1,6 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
-import { detail, closeDetail, state, openDetail, search } from '../store'
+import { detail, closeDetail, state, openDetail, search, route } from '../store'
 import ManaText from './ManaText.vue'
 import CardTip from './CardTip.vue'
 
@@ -300,6 +300,13 @@ function viewAllSimilar() {
 
 // 点单个标签 chip:按该标签查询(无搜索词时即按 EDHREC 排序的全量列表)
 function searchByTag(t) {
+  if (route.value === 'deck') {
+    const url = new URL(window.location.pathname, window.location.origin)
+    url.searchParams.set('tag', t)
+    url.hash = '/'
+    window.open(url.toString(), '_blank', 'noopener')
+    return
+  }
   state.tags = [t]
   state.tagMode = 'or'
   closeDetail()
