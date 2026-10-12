@@ -41,6 +41,16 @@ const draftStroke = ref(null)
 const selectionRect = ref(null)
 const pointerAction = ref(null)
 const cardContextMenu = ref(null)
+const cardContextMenuElement = ref(null)
+const contextMenuStatus = ref('')
+const contextMenuCard = computed(() => {
+  const item = elements.value.find((entry) => entry.id === cardContextMenu.value?.itemId)
+  return cards.value.find((card) => card.oracle_id === item?.oracleId) || null
+})
+const contextMenuTags = computed(() => {
+  const card = contextMenuCard.value
+  return card?.sf_tags?.length ? card.sf_tags : (card?.ai_tags || [])
+})
 
 const filteredCards = computed(() => {
   const value = query.value.trim().toLocaleLowerCase()
@@ -198,16 +208,39 @@ function addCard(card, x, y) {
   persist()
 }
 
-function openCardContextMenu(event, item) {
+async function openCardContextMenu(event, item) {
   event.preventDefault()
   event.stopPropagation()
-  const width = 160
-  const height = 132
+  contextMenuStatus.value = ''
   cardContextMenu.value = {
     itemId: item.id,
-    x: Math.max(8, Math.min(event.clientX, window.innerWidth - width - 8)),
-    y: Math.max(8, Math.min(event.clientY, window.innerHeight - height - 8)),
+    x: event.clientX,
+    y: event.clientY,
   }
+  await nextTick()
+  const bounds = cardContextMenuElement.value?.getBoundingClientRect()
+  if (!bounds) return
+  cardContextMenu.value.x = Math.max(8, Math.min(event.clientX, window.innerWidth - bounds.width - 8))
+  cardContextMenu.value.y = Math.max(8, Math.min(event.clientY, window.innerHeight - bounds.height - 8))
+}
+
+async function copyContextCardName(name, label) {
+  if (!name) return
+  try {
+    await navigator.clipboard.writeText(name)
+    contextMenuStatus.value = `${label}已复制`
+  } catch (error) {
+    console.error('复制卡牌名称失败', error)
+    contextMenuStatus.value = '复制失败，请检查浏览器剪贴板权限'
+  }
+}
+
+function openContextCardTag(tag) {
+  const url = new URL(window.location.pathname, window.location.origin)
+  url.searchParams.set('tag', tag)
+  url.hash = '/'
+  window.open(url.toString(), '_blank', 'noopener')
+  cardContextMenu.value = null
 }
 
 function copyContextCard() {
@@ -798,24 +831,48 @@ function setZoom(value) {
     </section>
     <div
       v-if="cardContextMenu"
-      class="fixed z-[100] w-40 overflow-hidden rounded-sm border border-line bg-panel py-1 shadow-2xl"
+      ref="cardContextMenuElement"
+      class="fixed z-[100] max-h-[80vh] w-60 overflow-y-auto rounded-sm border border-line bg-panel p-1.5 shadow-2xl"
       :style="{ left: `${cardContextMenu.x}px`, top: `${cardContextMenu.y}px` }"
       role="menu"
       aria-label="卡牌操作"
       @click.stop
     >
       <button
-        class="block w-full px-3 py-2 text-left text-xs text-mute transition-colors hover:bg-panel2 hover:text-parch"
+        class="block w-full rounded-sm px-2.5 py-2 text-left text-xs text-parch transition-colors hover:bg-panel2 hover:text-gold"
+        role="menuitem"
+        @click="copyContextCardName(contextMenuCard?.name_en, '英文名称')"
+      >复制卡片英文名</button>
+      <button
+        class="block w-full rounded-sm px-2.5 py-2 text-left text-xs text-parch transition-colors hover:bg-panel2 hover:text-gold disabled:cursor-default disabled:opacity-40"
+        :disabled="!contextMenuCard?.name_zh"
+        role="menuitem"
+        @click="copyContextCardName(contextMenuCard?.name_zh, '中文名称')"
+      >复制卡片中文名称</button>
+      <div v-if="contextMenuTags.length" class="my-1 border-t border-line pt-1">
+        <button
+          v-for="tag in contextMenuTags"
+          :key="tag"
+          class="block w-full rounded-sm px-2.5 py-1.5 text-left text-xs text-mute transition-colors hover:bg-panel2 hover:text-gold"
+          :title="tag"
+          role="menuitem"
+          @click="openContextCardTag(tag)"
+        >{{ state.meta?.tagdict?.[tag] || tag }}</button>
+      </div>
+      <p v-if="contextMenuStatus" class="px-2.5 py-1.5 text-[10px] text-faint" role="status">{{ contextMenuStatus }}</p>
+      <div class="my-1 border-t border-line"></div>
+      <button
+        class="block w-full rounded-sm px-2.5 py-2 text-left text-xs text-mute transition-colors hover:bg-panel2 hover:text-parch"
         role="menuitem"
         @click="deleteContextCard"
       >删除</button>
       <button
-        class="block w-full px-3 py-2 text-left text-xs text-mute transition-colors hover:bg-panel2 hover:text-parch"
+        class="block w-full rounded-sm px-2.5 py-2 text-left text-xs text-mute transition-colors hover:bg-panel2 hover:text-parch"
         role="menuitem"
         @click="copyContextCard"
       >复制</button>
       <button
-        class="block w-full px-3 py-2 text-left text-xs text-mute transition-colors hover:bg-panel2 hover:text-parch"
+        class="block w-full rounded-sm px-2.5 py-2 text-left text-xs text-mute transition-colors hover:bg-panel2 hover:text-parch"
         role="menuitem"
         @click="showContextCardDetail"
       >详情</button>

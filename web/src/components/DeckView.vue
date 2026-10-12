@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, nextTick, onMounted, onUnmounted } from 'vue'
 import { state, openDetail, LIST_COLS, MANA } from '../store'
 import ManaText from './ManaText.vue'
 import CardTip from './CardTip.vue'
@@ -7,6 +7,10 @@ import DeckCanvas from './DeckCanvas.vue'
 
 // 悬停卡图浮窗(网格瓦片与无图列表行共用)
 const cardTip = ref(null)
+const cardContextMenu = ref(null)
+const cardContextMenuElement = ref(null)
+const cardContextMenuPosition = ref({ x: 0, y: 0 })
+const cardContextCopyStatus = ref('')
 
 const EXAMPLE = `Commander
 1 受诅国王寇沃
@@ -185,6 +189,63 @@ function tagLabel(t) {
 function cardTags(c) {
   return c.sf_tags?.length ? c.sf_tags : (c.ai_tags || [])
 }
+
+async function openCardContextMenu(card, event) {
+  event.preventDefault()
+  cardTip.value?.hide()
+  cardContextMenu.value = card
+  cardContextCopyStatus.value = ''
+  cardContextMenuPosition.value = { x: event.clientX, y: event.clientY }
+  await nextTick()
+  const bounds = cardContextMenuElement.value?.getBoundingClientRect()
+  if (!bounds) return
+  cardContextMenuPosition.value = {
+    x: Math.max(8, Math.min(event.clientX, window.innerWidth - bounds.width - 8)),
+    y: Math.max(8, Math.min(event.clientY, window.innerHeight - bounds.height - 8)),
+  }
+}
+
+function closeCardContextMenu() {
+  cardContextMenu.value = null
+  cardContextCopyStatus.value = ''
+}
+
+function onContextMenuPointerDown(event) {
+  if (!cardContextMenuElement.value?.contains(event.target)) closeCardContextMenu()
+}
+
+function onContextMenuKeyDown(event) {
+  if (event.key === 'Escape') closeCardContextMenu()
+}
+
+async function copyCardName(value, label) {
+  if (!value) return
+  try {
+    await navigator.clipboard.writeText(value)
+    cardContextCopyStatus.value = `${label}已复制`
+  } catch (error) {
+    console.error('复制卡牌名称失败', error)
+    cardContextCopyStatus.value = '复制失败，请检查浏览器剪贴板权限'
+  }
+}
+
+function openTagInNewTab(tag) {
+  const url = new URL(window.location.pathname, window.location.origin)
+  url.searchParams.set('tag', tag)
+  url.hash = '/'
+  window.open(url.toString(), '_blank', 'noopener')
+  closeCardContextMenu()
+}
+
+onMounted(() => {
+  window.addEventListener('pointerdown', onContextMenuPointerDown)
+  window.addEventListener('keydown', onContextMenuKeyDown)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('pointerdown', onContextMenuPointerDown)
+  window.removeEventListener('keydown', onContextMenuKeyDown)
+})
 
 async function parse() {
   if (!text.value.trim() || loading.value) return
@@ -751,6 +812,7 @@ function onImg(e) {
             v-for="c in commanders"
             :key="c.oracle_id"
             class="group flex min-w-0 items-stretch gap-2.5"
+            @contextmenu="openCardContextMenu(c, $event)"
           >
             <button class="flex min-w-0 items-stretch gap-2.5 text-left" @click="openDetail(c.oracle_id)">
               <div class="w-[68px] shrink-0 overflow-hidden rounded-[3px] bg-panel2">
@@ -1187,6 +1249,7 @@ function onImg(e) {
           @mouseenter="cardTip?.show($event, c, `×${c.qty} · ${c.type_line_zh || c.type_line_en || ''}`)"
           @mousemove="cardTip?.move"
           @mouseleave="cardTip?.hide"
+          @contextmenu="openCardContextMenu(c, $event)"
         >
           <span class="font-num text-[11px] font-bold text-gold">×{{ c.qty }}</span>
           <span class="min-w-0">
@@ -1215,6 +1278,7 @@ function onImg(e) {
           v-for="c in filtered"
           :key="c.oracle_id"
           class="group flex flex-col gap-1"
+          @contextmenu="openCardContextMenu(c, $event)"
           @mouseenter="cardTip?.show($event, c)"
           @mousemove="cardTip?.move"
           @mouseleave="cardTip?.hide"
@@ -1251,12 +1315,45 @@ function onImg(e) {
             :key="c.oracle_id"
             class="hl-title truncate text-xs text-mute hover:text-parch"
             @click="openDetail(c.oracle_id)"
+            @contextmenu="openCardContextMenu(c, $event)"
             @mouseenter="cardTip?.show($event, c, `×${c.qty}`)"
             @mousemove="cardTip?.move"
             @mouseleave="cardTip?.hide"
           >{{ c.name_zh || c.name_en }} <span class="font-num text-faint">×{{ c.qty }}</span></button>
         </div>
       </div>
+    </div>
+    <div
+      v-if="cardContextMenu"
+      ref="cardContextMenuElement"
+      class="fixed z-50 max-h-[80vh] w-60 overflow-y-auto rounded-sm border border-line bg-panel p-1.5 shadow-xl"
+      :style="{ left: `${cardContextMenuPosition.x}px`, top: `${cardContextMenuPosition.y}px` }"
+      role="menu"
+      @pointerdown.stop
+      @click.stop
+    >
+      <button
+        class="block w-full rounded-sm px-2.5 py-2 text-left text-xs text-parch transition-colors hover:bg-panel2 hover:text-gold"
+        role="menuitem"
+        @click="copyCardName(cardContextMenu.name_en, '英文名称')"
+      >复制卡片英文名</button>
+      <button
+        class="block w-full rounded-sm px-2.5 py-2 text-left text-xs text-parch transition-colors hover:bg-panel2 hover:text-gold disabled:cursor-default disabled:opacity-40"
+        :disabled="!cardContextMenu.name_zh"
+        role="menuitem"
+        @click="copyCardName(cardContextMenu.name_zh, '中文名称')"
+      >复制卡片中文名称</button>
+      <div v-if="cardTags(cardContextMenu).length" class="my-1 border-t border-line pt-1">
+        <button
+          v-for="tag in cardTags(cardContextMenu)"
+          :key="tag"
+          class="block w-full rounded-sm px-2.5 py-1.5 text-left text-xs text-mute transition-colors hover:bg-panel2 hover:text-gold"
+          :title="tag"
+          role="menuitem"
+          @click="openTagInNewTab(tag)"
+        >{{ tagLabel(tag) }}</button>
+      </div>
+      <p v-if="cardContextCopyStatus" class="px-2.5 py-1.5 text-[10px] text-faint" role="status">{{ cardContextCopyStatus }}</p>
     </div>
     <DeckCanvas
       v-else-if="view === 'canvas' && canvasDeck"

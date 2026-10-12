@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import { state, openDetail, LIST_COLS } from '../store'
 
-const emit = defineEmits(['contextmenu'])
+const emit = defineEmits(['contextmenu', 'preview', 'preview-move', 'preview-leave'])
 const props = defineProps({
   card: Object,
 })
@@ -31,6 +31,9 @@ const tagZh = computed(() => {
     :style="{ gridTemplateColumns: LIST_COLS }"
     @click="openDetail(card.oracle_id)"
     @contextmenu="emit('contextmenu', card, $event)"
+    @mouseenter="emit('preview', $event, card)"
+    @mousemove="emit('preview-move', $event)"
+    @mouseleave="emit('preview-leave')"
   >
     <!-- 名称 -->
     <span class="min-w-0">

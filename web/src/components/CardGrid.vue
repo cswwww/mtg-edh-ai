@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { state, nextPage, prevPage, search, LIST_COLS } from '../store'
 import CardTile from './CardTile.vue'
 import CardRow from './CardRow.vue'
+import CardTip from './CardTip.vue'
 
 const HEADERS = ['名称', '类型', '费用', '标签', '稀有度', 'EDHREC']
 
@@ -19,6 +20,7 @@ const contextMenu = ref(null)
 const contextMenuElement = ref(null)
 const contextMenuPosition = ref({ x: 0, y: 0 })
 const copyStatus = ref('')
+const cardTip = ref(null)
 
 function setSize(v) {
   state.size = v
@@ -28,6 +30,7 @@ function setSize(v) {
 
 async function openCardContextMenu(card, event) {
   event.preventDefault()
+  cardTip.value?.hide()
   contextMenu.value = card
   copyStatus.value = ''
   contextMenuPosition.value = { x: event.clientX, y: event.clientY }
@@ -38,6 +41,18 @@ async function openCardContextMenu(card, event) {
     x: Math.max(8, Math.min(event.clientX, window.innerWidth - bounds.width - 8)),
     y: Math.max(8, Math.min(event.clientY, window.innerHeight - bounds.height - 8)),
   }
+}
+
+function showCardTip(event, card) {
+  cardTip.value?.show(event, card)
+}
+
+function moveCardTip(event) {
+  cardTip.value?.move(event)
+}
+
+function hideCardTip() {
+  cardTip.value?.hide()
 }
 
 function closeCardContextMenu() {
@@ -118,7 +133,15 @@ onUnmounted(() => {
           :class="i === HEADERS.length - 1 ? 'text-right' : ''"
         >{{ h }}</span>
       </div>
-      <CardRow v-for="c in state.items" :key="c.oracle_id" :card="c" @contextmenu="openCardContextMenu" />
+      <CardRow
+        v-for="c in state.items"
+        :key="c.oracle_id"
+        :card="c"
+        @contextmenu="openCardContextMenu"
+        @preview="showCardTip"
+        @preview-move="moveCardTip"
+        @preview-leave="hideCardTip"
+      />
       <p v-if="!state.items.length && !state.loading" class="py-16 text-center text-sm text-faint">
         没有符合条件的卡牌
       </p>
@@ -126,11 +149,21 @@ onUnmounted(() => {
 
     <!-- 图片网格 -->
     <div v-else class="grid min-h-0 flex-1 gap-3 overflow-y-auto p-4" :style="{ gridTemplateColumns: `repeat(${cols}, minmax(0,1fr))` }">
-      <CardTile v-for="c in state.items" :key="c.oracle_id" :card="c" @contextmenu="openCardContextMenu" />
+      <CardTile
+        v-for="c in state.items"
+        :key="c.oracle_id"
+        :card="c"
+        @contextmenu="openCardContextMenu"
+        @preview="showCardTip"
+        @preview-move="moveCardTip"
+        @preview-leave="hideCardTip"
+      />
       <p v-if="!state.items.length && !state.loading" class="col-span-full py-16 text-center text-sm text-faint">
         没有符合条件的卡牌
       </p>
     </div>
+
+    <CardTip ref="cardTip" />
 
     <div
       v-if="contextMenu"

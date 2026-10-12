@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import { state, openDetail } from '../store'
 
-const emit = defineEmits(['contextmenu'])
+const emit = defineEmits(['contextmenu', 'preview', 'preview-move', 'preview-leave'])
 const props = defineProps({
   card: Object,
 })
@@ -27,6 +27,9 @@ const sz = computed(() => sizes[state.size] || sizes.M)
     :class="sz.w"
     @click="openDetail(card.oracle_id)"
     @contextmenu="emit('contextmenu', card, $event)"
+    @mouseenter="emit('preview', $event, card)"
+    @mousemove="emit('preview-move', $event)"
+    @mouseleave="emit('preview-leave')"
   >
     <div class="w-full overflow-hidden rounded-[3px] bg-panel2" :class="sz.img">
       <img
