@@ -870,6 +870,7 @@ def deck_parse(body: dict):
             "image_url": card.get("image_url"),
             "art_crop": card.get("art_crop"),
             "mana_cost": card.get("mana_cost"),
+            "produced_mana": card.get("produced_mana") or [],
             "colors": card.get("colors") or [],
             "color_identity": card.get("color_identity") or [],
             "cmc": card.get("cmc"),

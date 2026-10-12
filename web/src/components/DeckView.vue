@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { state, openDetail, LIST_COLS } from '../store'
+import { state, openDetail, LIST_COLS, MANA } from '../store'
 import ManaText from './ManaText.vue'
 import CardTip from './CardTip.vue'
 
@@ -165,9 +165,84 @@ const curve = computed(() => {
 })
 const curveMax = computed(() => Math.max(1, ...curve.value))
 const curveSpellsTotal = computed(() => curve.value.reduce((s, n) => s + n, 0))
+function curvePct(n) {
+  return `${(n / curveMax.value) * 100}%`
+}
 const curveLandsTotal = computed(() =>
   (cards.value || []).reduce((s, c) => s + (isLand(c) ? c.qty : 0), 0)
 )
+
+// Color Cost:统计非地牌费用里的有色符号;混血/非瑞克西亚符号单列为灵活需求。
+const colorCost = computed(() => {
+  const pips = Object.fromEntries(COLOR_ROWS.map(({ c }) => [c, 0]))
+  const flexible = {}
+  let colorless = 0
+  for (const c of cards.value || []) {
+    if (isLand(c)) continue
+    for (const [, raw] of (c.mana_cost || '').matchAll(/\{([^}]+)\}/g)) {
+      const symbol = raw.toUpperCase()
+      if (Object.hasOwn(pips, symbol)) {
+        pips[symbol] += c.qty
+      } else if (symbol === 'C') {
+        colorless += c.qty
+      } else if (symbol.includes('/') && /[WUBRG]/.test(symbol)) {
+        flexible[symbol] = (flexible[symbol] || 0) + c.qty
+      }
+    }
+  }
+  return {
+    pips,
+    total: Object.values(pips).reduce((sum, n) => sum + n, 0),
+    flexible: Object.entries(flexible).sort(([a], [b]) => a.localeCompare(b)),
+    colorless,
+  }
+})
+// Color Production:按牌表数量统计 produced_mana 声明可产出的颜色;一张多色来源会分别计入多色。
+const productionRows = computed(() => COLOR_ROWS.map((row) => {
+  const sources = (cards.value || [])
+    .filter((c) => (c.produced_mana || []).includes(row.c))
+    .map((c) => ({ ...c, sourceQty: c.qty }))
+    .sort((a, b) => Number(isLand(b)) - Number(isLand(a)) || b.qty - a.qty)
+  const lands = sources
+    .filter(isLand)
+    .reduce((sum, c) => sum + c.sourceQty, 0)
+  const nonlands = sources
+    .filter((c) => !isLand(c))
+    .reduce((sum, c) => sum + c.sourceQty, 0)
+  return { ...row, sources, lands, nonlands, total: lands + nonlands }
+}))
+const costScaleMax = computed(() => Math.max(1, ...Object.values(colorCost.value.pips)))
+const productionScaleMax = computed(() => Math.max(1, ...productionRows.value.map((row) => row.total)))
+const colorChartRows = computed(() => productionRows.value.map((row) => ({
+  ...row,
+  cost: colorCost.value.pips[row.c],
+  costHeight: (colorCost.value.pips[row.c] / costScaleMax.value) * 100,
+  productionHeight: (row.total / productionScaleMax.value) * 100,
+})))
+const selectedProductionColor = ref('')
+const activeProductionColor = computed(() =>
+  selectedProductionColor.value || productionRows.value.find((row) => row.total)?.c || 'W'
+)
+const activeProduction = computed(() =>
+  productionRows.value.find((row) => row.c === activeProductionColor.value)
+)
+const showColorTips = ref(false)
+const showColorDetails = ref(false)
+function closeColorDetails() {
+  showColorDetails.value = false
+}
+function closeColorTips() {
+  showColorTips.value = false
+}
+function openColorDetails() {
+  closeColorTips()
+  showColorDetails.value = true
+}
+function openColorTips() {
+  closeColorDetails()
+  showColorTips.value = true
+}
+
 // 指挥官主将(Partner 时可能有多位;牌表未标主将时可手动指定,持久化到 localStorage)
 const CMD_KEY = 'mtg-deck-commander'
 function loadCmd() {
@@ -245,9 +320,6 @@ function closePicker() {
   pickerOpen.value = false
   pickerQ.value = ''
   pickerItems.value = []
-}
-function curvePct(n) {
-  return `${(n / curveMax.value) * 100}%`
 }
 function curveLabel(i) {
   return i >= 11 ? '11+' : String(i)
@@ -448,8 +520,10 @@ function onImg(e) {
         </div>
       </div>
 
+      <!-- 指挥官与紧凑法术力图表 -->
+      <div class="mt-3 grid gap-3 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
       <!-- 指挥官主将(始终显示;未识别时可在面板内手动搜索指定) -->
-      <div class="mt-3 flex items-stretch gap-3 rounded-sm border border-golddim/60 bg-panel p-3">
+      <div class="flex min-w-0 items-stretch gap-3 rounded-sm border border-golddim/60 bg-panel p-3">
         <div class="flex shrink-0 flex-col justify-center border-r border-line pr-3">
           <span class="text-[10px] tracking-[0.2em] text-faint">主将</span>
         </div>
@@ -544,30 +618,216 @@ function onImg(e) {
         </div>
       </div>
 
-      <!-- 曲线 + 筛选:左右两栏(筛选在左,曲线在右,高度对齐) -->
-      <div class="mt-3 flex flex-wrap gap-3">
-
-      <!-- 法术力曲线(右栏,固定宽度,与筛选栏等高) -->
-      <div class="order-2 flex w-[320px] shrink-0 flex-col rounded-sm border border-line bg-panel p-3">
-        <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
-          <span class="text-[10px] tracking-widest text-faint">法术力曲线</span>
-          <span class="text-[10px] text-faint">法术 {{ curveSpellsTotal }} 张 · 不含地(地 {{ curveLandsTotal }} 张)</span>
-        </div>
-        <div class="mt-2 flex flex-1 items-end gap-1">
-          <div v-for="(n, i) in curve" :key="i" class="flex min-w-0 flex-1 flex-col items-center gap-0.5"
-            :title="`${curveLabel(i)} 费:${n} 张`"
+      <!-- 法术力详情与说明弹窗 -->
+        <Teleport to="body">
+          <div
+            v-if="showColorDetails"
+            class="fixed inset-0 z-[80] flex items-center justify-center bg-black/75 p-3 sm:p-6"
+            role="presentation"
+            @click.self="closeColorDetails"
           >
-            <span class="font-num text-[9px] leading-none text-faint">{{ n || '' }}</span>
-            <div class="flex h-20 w-full flex-col justify-end">
-              <div class="w-full bg-golddim" :style="{ height: curvePct(n) }"></div>
-            </div>
-            <span class="font-num text-[9px] leading-none text-mute">{{ curveLabel(i) }}</span>
+            <section
+              class="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-sm border border-golddim/60 bg-panel shadow-2xl"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="color-details-title"
+              tabindex="-1"
+              autofocus
+              @keydown.esc="closeColorDetails"
+            >
+              <header class="flex items-center gap-3 border-b border-line px-4 py-3">
+                <div class="min-w-0 flex-1">
+                  <h4 id="color-details-title" class="text-sm font-bold text-parch">颜色需求与产色来源详情</h4>
+                  <p class="mt-0.5 text-[10px] text-faint">按颜色查看费用符号与潜在产色牌</p>
+                </div>
+                <button
+                  class="rounded-sm border border-line bg-panel2 px-2.5 py-1 text-[11px] text-mute transition-colors hover:border-golddim hover:text-parch"
+                  aria-label="关闭详情"
+                  @click="closeColorDetails"
+                >关闭</button>
+              </header>
+              <div class="grid min-h-0 gap-4 overflow-y-auto p-4 lg:grid-cols-2">
+                <div class="min-w-0">
+                  <div class="flex items-baseline justify-between gap-2">
+                    <p class="text-xs font-bold text-parch">有色符号需求 <span class="text-[10px] font-normal tracking-wide text-faint">Color Cost</span></p>
+                    <span class="font-num text-[10px] text-faint">{{ colorCost.total }} 个五色符号</span>
+                  </div>
+                  <div class="mt-2 space-y-1.5">
+                    <div v-for="m in COLOR_ROWS" :key="m.c" class="flex items-center gap-2">
+                      <span class="w-7 text-[10px]" :style="{ color: MANA[m.c].color }">{{ m.label }}</span>
+                      <div class="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-panel2">
+                        <div
+                          class="h-full rounded-full"
+                          :style="{
+                            width: `${(colorCost.pips[m.c] / costScaleMax) * 100}%`,
+                            background: MANA[m.c].color,
+                          }"
+                        ></div>
+                      </div>
+                      <span class="w-7 text-right font-num text-[10px] text-parch">{{ colorCost.pips[m.c] }}</span>
+                    </div>
+                  </div>
+                  <div class="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-mute">
+                    <span v-if="colorCost.flexible.length">
+                      灵活符号:
+                      <span v-for="([symbol, n], i) in colorCost.flexible" :key="symbol">
+                        <span v-if="i"> · </span><span class="font-num text-parch">{{ '{' + symbol + '}' }} ×{{ n }}</span>
+                      </span>
+                    </span>
+                    <span v-if="colorCost.colorless">无色需求 <span class="font-num text-parch">{{ colorCost.colorless }}</span></span>
+                    <span v-if="!colorCost.flexible.length && !colorCost.colorless" class="text-faint">不含通用费用</span>
+                  </div>
+                </div>
+
+                <div class="min-w-0">
+                  <div class="flex items-baseline justify-between gap-2">
+                    <p class="text-xs font-bold text-parch">潜在产色牌数 <span class="text-[10px] font-normal tracking-wide text-faint">Color Production</span></p>
+                    <span class="text-[10px] text-faint">按牌表张数计</span>
+                  </div>
+                  <div class="mt-2 flex flex-wrap gap-1.5">
+                    <button
+                      v-for="row in productionRows"
+                      :key="row.c"
+                      class="flex items-center gap-1.5 rounded-sm border px-2 py-1 text-[10px] transition-colors"
+                      :class="activeProductionColor === row.c
+                        ? 'border-golddim bg-golddim/30 text-parch'
+                        : 'border-line bg-panel2 text-mute hover:border-golddim hover:text-parch'"
+                      :aria-pressed="activeProductionColor === row.c"
+                      @click="selectedProductionColor = row.c"
+                    >
+                      <span class="font-bold" :style="{ color: MANA[row.c].color }">{{ row.label }}</span>
+                      <span class="font-num">{{ row.total }}</span>
+                      <span class="text-faint">地 {{ row.lands }} / 非地 {{ row.nonlands }}</span>
+                    </button>
+                  </div>
+                  <div v-if="activeProduction?.sources.length" class="mt-2 max-h-56 overflow-y-auto border-t border-line pt-1.5">
+                    <button
+                      v-for="c in activeProduction.sources"
+                      :key="c.oracle_id"
+                      class="flex w-full items-center gap-2 py-1 text-left text-[10px] text-mute transition-colors hover:text-gold"
+                      :title="c.name_en"
+                      @click="closeColorDetails(); openDetail(c.oracle_id)"
+                    >
+                      <span class="min-w-0 flex-1 truncate">{{ c.name_zh || c.name_en }}</span>
+                      <span class="shrink-0 text-faint">{{ isLand(c) ? '地' : '非地' }}</span>
+                      <span class="w-8 shrink-0 text-right font-num text-parch">×{{ c.sourceQty }}</span>
+                    </button>
+                  </div>
+                  <p v-else class="mt-2 border-t border-line pt-1.5 text-[10px] text-faint">牌表中没有声明可产{{ activeProduction?.label }}色法术力的牌</p>
+                </div>
+              </div>
+            </section>
           </div>
-        </div>
+        </Teleport>
+
+        <Teleport to="body">
+          <div
+            v-if="showColorTips"
+            class="fixed inset-0 z-[80] flex items-center justify-center bg-black/75 p-3 sm:p-6"
+            role="presentation"
+            @click.self="closeColorTips"
+          >
+            <section
+              class="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-sm border border-golddim/60 bg-panel shadow-2xl"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="color-tips-title"
+              tabindex="-1"
+              autofocus
+              @keydown.esc="closeColorTips"
+            >
+              <header class="flex items-center gap-3 border-b border-line px-4 py-3">
+                <div class="min-w-0 flex-1">
+                  <h4 id="color-tips-title" class="text-sm font-bold text-parch">统计说明</h4>
+                  <p class="mt-0.5 text-[10px] text-faint">颜色需求与产色来源的统计逻辑和依据</p>
+                </div>
+                <button
+                  class="rounded-sm border border-line bg-panel2 px-2.5 py-1 text-[11px] text-mute transition-colors hover:border-golddim hover:text-parch"
+                  aria-label="关闭统计说明"
+                  @click="closeColorTips"
+                >关闭</button>
+              </header>
+              <div class="overflow-y-auto p-4 text-xs leading-relaxed text-mute">
+                <ul class="list-disc space-y-2 pl-4">
+                  <li><span class="text-parch">Color Cost（有色符号需求）</span>：读取牌表解析结果中每张非地牌的法术力费用，按牌表数量统计 `{W}`、`{U}`、`{B}`、`{R}`、`{G}` 符号；主将若在解析牌表中也按其牌表数量计入。通用费用（如 `{2}`）不代表特定颜色，因此不计入五色需求。</li>
+                  <li>混血、双色混血及非瑞克西亚费用（如 `{W/U}`、`{2/W}`、`{W/P}`）作为一个「灵活符号」单独列出，不重复算作多个颜色；`{C}` 单列为无色需求。</li>
+                  <li><span class="text-parch">Color Production（潜在产色）</span>：依据卡牌数据中的 <span class="font-num text-parch">produced_mana</span> 字段，统计牌表里声明可产出该色法术力的牌张数，并按地 / 非地分类。数量按牌表张数计算。</li>
+                  <li>一张牌若可产多色，会分别出现在多个颜色的统计及清单中，各色数字不能相加作为独立牌数。这里表示潜在产色，不代表每回合可稳定产出或当前可用法术力；条件、费用和横置要求不另行模拟。</li>
+                  <li>柱状图中，需求以有色符号数计，产色以牌张数计；柱高分别按各自数据最大值归一化，柱顶展示实际数量，不可直接用柱高比较两个不同单位。</li>
+                </ul>
+              </div>
+            </section>
+          </div>
+        </Teleport>
+
+      <div class="grid min-w-0 gap-2 sm:grid-cols-2">
+        <section class="min-w-0 rounded-sm border border-line bg-panel p-2.5">
+          <div class="flex items-center justify-between gap-2">
+            <span class="truncate text-[10px] font-bold text-parch">颜色需求与产色</span>
+            <div class="flex shrink-0 items-center gap-1">
+              <button
+                class="rounded-sm border border-line bg-panel2 px-1.5 py-0.5 text-[9px] text-mute transition-colors hover:border-golddim hover:text-parch"
+                @click="openColorDetails"
+              >详情</button>
+              <button
+                class="rounded-sm border border-line bg-panel2 px-1.5 py-0.5 text-[9px] text-mute transition-colors hover:border-golddim hover:text-parch"
+                @click="openColorTips"
+              >说明</button>
+            </div>
+          </div>
+          <div class="mt-1.5 flex items-center gap-2 text-[8px] text-faint">
+            <span class="inline-flex items-center gap-1"><i class="h-2 w-2 rounded-sm bg-golddim"></i>需求</span>
+            <span class="inline-flex items-center gap-1"><i class="h-2 w-2 rounded-sm bg-[#8f887b]"></i>产色</span>
+          </div>
+          <div class="mt-1.5 grid grid-cols-5 gap-1">
+            <div
+              v-for="row in colorChartRows"
+              :key="row.c"
+              class="flex min-w-0 flex-col items-center rounded-sm border border-line/70 bg-panel2/50 px-0.5 pt-1"
+              :title="`${row.label}色需求 ${row.cost} 个有色符号；潜在产色来源 ${row.total} 张`"
+            >
+              <div class="flex h-14 w-full items-end justify-center gap-1 border-b border-line pb-0.5">
+                <div class="flex h-full w-3 flex-col items-center justify-end gap-0.5">
+                  <span class="font-num text-[8px] leading-none text-parch">{{ row.cost }}</span>
+                  <div class="w-full rounded-t-sm bg-golddim" :style="{ height: `${row.costHeight}%` }"></div>
+                </div>
+                <div class="flex h-full w-3 flex-col items-center justify-end gap-0.5">
+                  <span class="font-num text-[8px] leading-none text-parch">{{ row.total }}</span>
+                  <div class="w-full rounded-t-sm bg-[#8f887b]" :style="{ height: `${row.productionHeight}%` }"></div>
+                </div>
+              </div>
+              <span class="py-1 text-[9px] font-bold" :style="{ color: MANA[row.c].color }">{{ row.label }}</span>
+            </div>
+          </div>
+        </section>
+
+        <section class="flex min-w-0 flex-col rounded-sm border border-line bg-panel p-2.5">
+          <div class="flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5">
+            <span class="text-[10px] font-bold text-parch">法术力曲线</span>
+            <span class="text-[8px] text-faint">{{ curveSpellsTotal }} 张法术 · {{ curveLandsTotal }} 张地</span>
+          </div>
+          <div class="mt-1.5 flex min-h-0 flex-1 items-end gap-0.5">
+            <div
+              v-for="(n, i) in curve"
+              :key="i"
+              class="flex min-w-0 flex-1 flex-col items-center gap-0.5"
+              :title="`${curveLabel(i)} 费:${n} 张`"
+            >
+              <span class="font-num text-[8px] leading-none text-faint">{{ n || '' }}</span>
+              <div class="flex h-14 w-full flex-col justify-end">
+                <div class="w-full bg-golddim" :style="{ height: curvePct(n) }"></div>
+              </div>
+              <span class="font-num text-[8px] leading-none text-mute">{{ curveLabel(i) }}</span>
+            </div>
+          </div>
+        </section>
+      </div>
       </div>
 
+      <!-- 属性筛选与标签筛选 -->
+      <div class="mt-3 grid gap-3 lg:grid-cols-2">
       <!-- 颜色 / 类型 / 总法术力 筛选 -->
-      <div class="order-1 min-w-0 flex-1 rounded-sm border border-line bg-panel p-3">
+      <div class="min-w-0 rounded-sm border border-line bg-panel p-3">
         <div class="flex flex-wrap items-center gap-x-5 gap-y-2">
           <div class="flex items-center gap-1.5">
             <span class="text-[10px] tracking-widest text-faint">颜色</span>
@@ -640,22 +900,8 @@ function onImg(e) {
         <p class="mt-1.5 text-[10px] text-faint">颜色默认精确匹配(⊆=不含未选 · ∩=部分匹配);类型多选为交集;总法术力多选为并集</p>
       </div>
 
-      </div>
-
-      <!-- 未识别行 -->
-      <div v-if="unmatched.length" class="mt-3 rounded-sm border border-red-900 bg-red-950/30 p-3">
-        <div class="flex items-center gap-3">
-          <p class="text-[11px] font-bold text-red-300">以下 {{ unmatched.length }} 行没能匹配到卡库:</p>
-          <button
-            class="rounded-sm border border-red-800 px-2 py-0.5 text-[10px] text-red-200 transition-colors hover:bg-red-900/50"
-            @click="copyUnmatched"
-          >{{ copiedUnmatched ? '已复制 ✓' : '复制清单' }}</button>
-        </div>
-        <p class="mt-1 font-num text-[10px] leading-relaxed text-red-200/70">{{ unmatched.join('、') }}</p>
-      </div>
-
-      <!-- 标签云 -->
-      <div class="mt-3 rounded-sm border border-line bg-panel p-3">
+      <!-- 标签筛选 -->
+      <div class="min-w-0 rounded-sm border border-line bg-panel p-3">
         <p class="text-[10px] tracking-widest text-faint">牌内标签(点击筛选,悬浮看英文原名)</p>
         <div class="mt-2 flex flex-wrap gap-1.5">
           <button
@@ -683,6 +929,19 @@ function onImg(e) {
             ({{ untagged.length }} 张卡无标签)
           </span>
         </div>
+      </div>
+      </div>
+
+      <!-- 未识别行 -->
+      <div v-if="unmatched.length" class="mt-3 rounded-sm border border-red-900 bg-red-950/30 p-3">
+        <div class="flex items-center gap-3">
+          <p class="text-[11px] font-bold text-red-300">以下 {{ unmatched.length }} 行没能匹配到卡库:</p>
+          <button
+            class="rounded-sm border border-red-800 px-2 py-0.5 text-[10px] text-red-200 transition-colors hover:bg-red-900/50"
+            @click="copyUnmatched"
+          >{{ copiedUnmatched ? '已复制 ✓' : '复制清单' }}</button>
+        </div>
+        <p class="mt-1 font-num text-[10px] leading-relaxed text-red-200/70">{{ unmatched.join('、') }}</p>
       </div>
 
       <!-- 命中统计 -->
