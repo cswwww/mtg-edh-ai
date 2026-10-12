@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 import { state, openDetail, LIST_COLS, MANA } from '../store'
 import ManaText from './ManaText.vue'
 import CardTip from './CardTip.vue'
+import DeckCanvas from './DeckCanvas.vue'
 
 // 悬停卡图浮窗(网格瓦片与无图列表行共用)
 const cardTip = ref(null)
@@ -89,6 +90,10 @@ function persistDecks() {
 }
 const deckList = computed(() =>
   [...decks.value].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)))
+const canvasDeck = computed(() => {
+  const deck = decks.value.find((item) => item.id === selectedDeckId.value)
+  return deck && cards.value ? { ...deck, cards: cards.value } : null
+})
 function clearCurrentDeck() {
   cards.value = null
   unmatched.value = []
@@ -684,7 +689,7 @@ function onImg(e) {
     </div>
 
     <!-- 结果区 -->
-    <div v-else class="px-4 py-4">
+    <div v-else-if="view === 'detail'" class="px-4 py-4">
       <div class="flex flex-wrap items-center gap-2">
         <button
           class="rounded-sm border px-2.5 py-1 text-[11px] text-mute transition-colors hover:border-golddim hover:text-parch"
@@ -695,6 +700,10 @@ function onImg(e) {
           class="rounded-sm border border-line bg-panel2 px-2 py-1 text-[10px] text-mute transition-colors hover:border-golddim hover:text-parch"
           @click="editDeck(decks.find((deck) => deck.id === selectedDeckId))"
         >✎ 编辑牌表</button>
+        <button
+          class="rounded-sm border border-golddim bg-golddim/30 px-2.5 py-1 text-[10px] font-bold text-gold transition-colors hover:bg-golddim/50"
+          @click="view = 'canvas'"
+        >▧ 打开画布</button>
         <span class="font-num text-[11px] text-mute">
           {{ cards.length }} 种卡 · {{ totalQty }} 张 · {{ tagCounts.length }} 个标签
         </span>
@@ -1265,5 +1274,11 @@ function onImg(e) {
         </div>
       </div>
     </div>
+    <DeckCanvas
+      v-else-if="view === 'canvas' && canvasDeck"
+      :deck="canvasDeck"
+      @close="view = 'detail'"
+      @detail="openDetail"
+    />
   </div>
 </template>
