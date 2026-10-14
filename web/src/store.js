@@ -134,12 +134,12 @@ export async function search(resetPage = true) {
 
 export function nextPage() {
   state.page++
-  search(false)
+  return search(false)
 }
 export function prevPage() {
   if (state.page > 1) {
     state.page--
-    search(false)
+    return search(false)
   }
 }
 

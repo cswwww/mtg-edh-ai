@@ -16,11 +16,18 @@ const SIZES = [
 const cols = computed(() => ({ S: 8, M: 6, L: 4 }[state.size] || 6))
 const isList = computed(() => state.size === 'LIST')
 const totalPages = computed(() => Math.max(1, Math.ceil(state.total / state.pageSize)))
+const resultsScroller = ref(null)
 const contextMenu = ref(null)
 const contextMenuElement = ref(null)
 const contextMenuPosition = ref({ x: 0, y: 0 })
 const copyStatus = ref('')
 const cardTip = ref(null)
+
+async function changePage(pageAction) {
+  await pageAction()
+  await nextTick()
+  resultsScroller.value?.scrollTo({ top: 0 })
+}
 
 function setSize(v) {
   state.size = v
@@ -123,7 +130,7 @@ onUnmounted(() => {
     <div v-if="state.error" class="p-8 text-sm text-[#d95f4e]">查询失败:{{ state.error }}(请确认后端服务已启动)</div>
 
     <!-- 无图:紧凑列表 -->
-    <div v-else-if="isList" class="min-h-0 flex-1 overflow-y-auto">
+    <div v-else-if="isList" ref="resultsScroller" class="min-h-0 flex-1 overflow-y-auto">
       <div
         class="sticky top-0 z-10 grid gap-2 border-b border-line bg-panel px-3 py-1.5"
         :style="{ gridTemplateColumns: LIST_COLS }"
@@ -148,7 +155,7 @@ onUnmounted(() => {
     </div>
 
     <!-- 图片网格 -->
-    <div v-else class="grid min-h-0 flex-1 gap-3 overflow-y-auto p-4" :style="{ gridTemplateColumns: `repeat(${cols}, minmax(0,1fr))` }">
+    <div v-else ref="resultsScroller" class="grid min-h-0 flex-1 gap-3 overflow-y-auto p-4" :style="{ gridTemplateColumns: `repeat(${cols}, minmax(0,1fr))` }">
       <CardTile
         v-for="c in state.items"
         :key="c.oracle_id"
@@ -202,13 +209,13 @@ onUnmounted(() => {
       <button
         class="rounded-sm border border-line px-3 py-1.5 text-xs text-mute hover:text-parch disabled:opacity-30"
         :disabled="state.page <= 1 || state.loading"
-        @click="prevPage()"
+        @click="changePage(prevPage)"
       >上一页</button>
       <p class="text-xs text-faint font-num">{{ state.page }} / {{ totalPages }}</p>
       <button
         class="rounded-sm border border-line px-3 py-1.5 text-xs text-mute hover:text-parch disabled:opacity-30"
         :disabled="state.page >= totalPages || state.loading"
-        @click="nextPage()"
+        @click="changePage(nextPage)"
       >下一页</button>
     </div>
   </div>
